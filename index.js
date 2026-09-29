@@ -22,6 +22,8 @@ const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { handleCommand } = require('./commands/router');
 const { startWebServer } = require('./web/server');
+const { registerAntiNuke } = require('./systems/antinuke');
+const { registerReactionRoles } = require('./systems/reactionRoles');
 
 if (!env.TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -40,7 +42,7 @@ const intents = [
 ];
 if (env.PRESENCE_INTENT) intents.push(GatewayIntentBits.GuildPresences);
 
-const client = new Client({ intents, partials: [Partials.Channel, Partials.Message] });
+const client = new Client({ intents, partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember] });
 
 client.once('clientReady', onReady);
 client.once('ready', onReady);
@@ -217,10 +219,18 @@ client.on('messageCreate', async (message) => {
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
   if (aiCh && message.channel.id === aiCh && !message.content.startsWith(brand.PREFIX)) {
-    if (env.OPENAI_API_KEY) {
-      await message.channel.sendTyping().catch(() => {});
-      const reply = await askAI(message.content);
-      if (reply) await message.reply({ content: reply, allowedMentions: { parse: [] } }).catch(() => {});
+    if (!env.OPENAI_API_KEY) {
+      await message.reply({ content: 'AI is offline — set `OPENAI_API_KEY` (or Groq `gsk_…`) in env.' }).catch(() => {});
+      return;
+    }
+    await message.channel.sendTyping().catch(() => {});
+    const reply = await askAI(message.content);
+    if (reply?.text) {
+      await message.reply({ content: reply.text, allowedMentions: { parse: [] } }).catch(() => {});
+    } else {
+      await message.reply({
+        content: `AI error: ${reply?.error || 'unknown'}\nTip: for Groq use model \`llama-3.3-70b-versatile\` and key starting with \`gsk_\`.`
+      }).catch(() => {});
     }
     return;
   }
@@ -337,6 +347,8 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+registerAntiNuke(client);
+registerReactionRoles(client);
 startWebServer(client);
 
 client.on('error', (e) => console.error('Discord', e.message));
