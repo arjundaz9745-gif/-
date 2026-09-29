@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>ᴅᴀꜱʜᴍᴏᴅ · Panel</title>
+<style>
+:root{
+  --bg:#0e1015; --panel:#161a22; --panel2:#1c212b; --border:#2a3140;
+  --text:#e8eaed; --muted:#8b95a8; --accent:#1abc9c; --accent2:#16a085;
+  --danger:#e74c3c; --warn:#f1c40f; --ok:#2ecc71;
+  --sidebar:260px; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+body{
+  background:
+    linear-gradient(135deg, rgba(14,16,21,.88) 0%, rgba(14,16,21,.72) 45%, rgba(14,16,21,.9) 100%),
+    url('/public/bg-desktop.jpg') center/cover fixed;
+  min-height:100vh;
+}
+@media (max-width:768px){
+  body{background-attachment:scroll;background-size:cover}
+}
+
+/* LOGIN */
+#login-view{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+}
+.login-card{
+  width:100%;max-width:400px;background:rgba(22,26,34,.92);border:1px solid var(--border);
+  border-radius:16px;padding:32px 28px;backdrop-filter:blur(18px);box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+.login-card h1{font-size:1.25rem;font-weight:700;margin-bottom:4px;letter-spacing:.02em}
+.login-card .sub{color:var(--muted);font-size:.85rem;margin-bottom:24px}
+.login-card label{display:block;font-size:.75rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
+.login-card input{
+  width:100%;padding:12px 14px;border-radius:8px;border:1px solid var(--border);
+  background:var(--panel2);color:var(--text);font-size:1rem;margin-bottom:16px;outline:none;
+}
+.login-card input:focus{border-color:var(--accent)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:12px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:.9rem;
+  transition:background .15s,transform .1s;
+}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--accent);color:#0a0c10;width:100%}
+.btn-primary:hover{background:var(--accent2)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:var(--danger);color:#fff}
+.err{color:var(--danger);font-size:.85rem;margin-bottom:12px;min-height:1.2em}
+.brand-foot{margin-top:20px;text-align:center;font-size:.72rem;color:var(--muted);line-height:1.5}
+
+/* APP SHELL */
+#app{display:none;min-height:100vh}
+#app.open{display:flex}
+.sidebar{
+  width:var(--sidebar);flex-shrink:0;background:rgba(14,16,21,.94);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;backdrop-filter:blur(16px);position:fixed;inset:0 auto 0 0;z-index:40;
+  transform:translateX(0);transition:transform .2s;
+}
+.sidebar .logo{padding:22px 20px 12px;border-bottom:1px solid var(--border)}
+.sidebar .logo h2{font-size:1rem;font-weight:700}
+.sidebar .logo p{font-size:.7rem;color:var(--muted);margin-top:4px}
+.nav{padding:12px 10px;flex:1;overflow:auto}
+.nav button{
+  width:100%;text-align:left;padding:10px 12px;margin-bottom:4px;border:none;border-radius:8px;
+  background:transparent;color:var(--muted);cursor:pointer;font-size:.88rem;font-weight:500;
+}
+.nav button:hover,.nav button.active{background:rgba(26,188,156,.12);color:var(--accent)}
+.side-foot{padding:14px 16px;border-top:1px solid var(--border);font-size:.68rem;color:var(--muted);line-height:1.45}
+
+.main{margin-left:var(--sidebar);flex:1;min-height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;
+  border-bottom:1px solid var(--border);background:rgba(14,16,21,.75);backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:20;
+}
+.topbar h3{font-size:.95rem;font-weight:600}
+.topbar .right{display:flex;gap:10px;align-items:center}
+.badge{font-size:.7rem;padding:4px 8px;border-radius:999px;background:rgba(46,204,113,.15);color:var(--ok);border:1px solid rgba(46,204,113,.3)}
+.badge.off{background:rgba(231,76,60,.15);color:var(--danger);border-color:rgba(231,76,60,.3)}
+
+.content{padding:22px;flex:1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:20px}
+.card{
+  background:rgba(22,26,34,.9);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px 18px;backdrop-filter:blur(10px);
+}
+.card .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.card .value{font-size:1.5rem;font-weight:700;margin-top:6px}
+.card .hint{font-size:.75rem;color:var(--muted);margin-top:6px}
+
+.panel{
+  background:rgba(22,26,34,.92);border:1px solid var(--border);border-radius:var(--radius);
+  padding:18px 20px;margin-bottom:16px;backdrop-filter:blur(12px);
+}
+.panel h4{font-size:.9rem;margin-bottom:12px;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
+.toggle{
+  display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
+  background:var(--panel2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px;
+}
+.toggle span{font-size:.88rem}
+.switch{
+  width:42px;height:24px;border-radius:999px;background:#3a4254;position:relative;cursor:pointer;border:none;
+}
+.switch.on{background:var(--accent)}
+.switch::after{
+  content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s;
+}
+.switch.on::after{left:21px}
+input[type=text],input[type=password],select,textarea{
+  background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);
+  padding:10px 12px;font-size:.9rem;outline:none;width:100%;max-width:420px;
+}
+textarea{min-height:90px;resize:vertical}
+.menu-btn{display:none;background:transparent;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px}
+
+@media (max-width:900px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+  .menu-btn{display:inline-flex}
+  .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:30}
+  .overlay.show{display:block}
+}
+.hidden{display:none!important}
+.toast{
+  position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--border);
+  padding:12px 16px;border-radius:10px;font-size:.85rem;z-index:100;box-shadow:0 10px 30px rgba(0,0,0,.4);
+  display:none;
+}
+.toast.show{display:block}
+</style>
+</head>
+<body>
+<div id="login-view">
+  <div class="login-card">
+    <h1>ᴅᴀꜱʜᴍᴏᴅ</h1>
+    <p class="sub">Admin panel · Ping = Mute</p>
+    <div class="err" id="login-err"></div>
+    <label>Admin password</label>
+    <input type="password" id="pw" placeholder="Enter admin password" autocomplete="current-password"/>
+    <button class="btn btn-primary" id="login-btn">Sign in</button>
+    <p class="brand-foot">Coded by DashWho<br/>Enhanced by DakshBro</p>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <h2>ᴅᴀꜱʜᴍᴏᴅ</h2>
+      <p>Server control panel</p>
+    </div>
+    <nav class="nav">
+      <button class="active" data-tab="overview">Overview</button>
+      <button data-tab="protection">Protection</button>
+      <button data-tab="invites">Invites & Messages</button>
+      <button data-tab="sync">Sync / Export</button>
+      <button data-tab="channels">Channels</button>
+      <button data-tab="announce">Announce link</button>
+    </nav>
+    <div class="side-foot">Coded by DashWho<br/>Enhanced by DakshBro</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="menu-btn" id="menu-btn">☰</button>
+        <h3 id="page-title">Overview</h3>
+      </div>
+      <div class="right">
+        <span class="badge" id="bot-badge">…</span>
+        <button class="btn btn-ghost" id="logout" style="padding:8px 12px;font-size:.8rem">Logout</button>
+      </div>
+    </header>
+    <div class="content">
+      <!-- OVERVIEW -->
+      <section id="tab-overview">
+        <div class="grid">
+          <div class="card"><div class="label">Bot</div><div class="value" id="st-tag">—</div><div class="hint" id="st-online">status</div></div>
+          <div class="card"><div class="label">Guilds</div><div class="value" id="st-guilds">—</div><div class="hint">connected</div></div>
+          <div class="card"><div class="label">Ping</div><div class="value" id="st-ping">—</div><div class="hint">websocket</div></div>
+          <div class="card"><div class="label">Uptime</div><div class="value" id="st-uptime">—</div><div class="hint">process</div></div>
+        </div>
+        <div class="panel">
+          <h4>Quick status</h4>
+          <p style="color:var(--muted);font-size:.88rem;line-height:1.5">Protection, AI channel, and sync run from this panel. Changes save to bot memory and can export to your sync channel.</p>
+        </div>
+      </section>
+
+      <!-- PROTECTION -->
+      <section id="tab-protection" class="hidden">
+        <div class="panel">
+          <h4>Modules</h4>
+          <div class="toggle"><span>Automod</span><button class="switch" id="sw-automod"></button></div>
+          <div class="toggle"><span>Anti-raid</span><button class="switch" id="sw-antiraid"></button></div>
+          <div class="toggle"><span>Anti-nuke</span><button class="switch" id="sw-antinuke"></button></div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn btn-primary" id="save-prot" style="width:auto">Save protection</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- INVITES -->
+      <section id="tab-invites" class="hidden">
+        <div class="panel">
+          <h4>Invite stats (top)</h4>
+          <div id="invite-list" style="font-size:.88rem;color:var(--muted)">Loading…</div>
+        </div>
+        <div class="panel">
+          <h4>Message stats (top)</h4>
+          <div id="msg-list" style="font-size:.88rem;color:var(--muted)">Loading…</div>
+        </div>
+      </section>
+
+      <!-- SYNC -->
+      <section id="tab-sync" class="hidden">
+        <div class="panel">
+          <h4>Sync channel ID</h4>
+          <input type="text" id="sync-ch" placeholder="Channel snowflake"/>
+          <div class="row" style="margin-top:12px">
+            <button class="btn btn-primary" id="save-sync" style="width:auto">Save sync channel</button>
+            <button class="btn btn-ghost" id="do-export" style="width:auto">Export now</button>
+            <button class="btn btn-ghost" id="do-import" style="width:auto">Import now</button>
+          </div>
+          <p style="margin-top:12px;font-size:.8rem;color:var(--muted)">Auto-import every 5 minutes · export on data changes</p>
+        </div>
+      </section>
+
+      <!-- CHANNELS -->
+      <section id="tab-channels" class="hidden">
+        <div class="panel">
+          <h4>AI channel ID</h4>
+          <input type="text" id="ai-ch" placeholder="AI chat channel snowflake"/>
+          <div class="row" style="margin-top:12px">
+            <button class="btn btn-primary" id="save-ai" style="width:auto">Save AI channel</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h4>Log channel ID</h4>
+          <input type="text" id="log-ch" placeholder="Protection log channel"/>
+          <div class="row" style="margin-top:12px">
+            <button class="btn btn-primary" id="save-log" style="width:auto">Save log channel</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ANNOUNCE -->
+      <section id="tab-announce" class="hidden">
+        <div class="panel">
+          <h4>Post dashboard access message</h4>
+          <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Sends a clean embed to a channel with the panel link. Password is only shown if you check the box (staff-only channels recommended).</p>
+          <label style="font-size:.75rem;color:var(--muted)">Channel ID</label>
+          <input type="text" id="ann-ch" placeholder="Channel to post in" style="margin-bottom:10px"/>
+          <label style="font-size:.75rem;color:var(--muted)">Dashboard URL (your Render URL)</label>
+          <input type="text" id="ann-url" placeholder="https://your-service.onrender.com" style="margin-bottom:10px"/>
+          <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin-bottom:12px;cursor:pointer">
+            <input type="checkbox" id="ann-show-pw"/> Include admin password in message
+          </label>
+          <button class="btn btn-primary" id="do-announce" style="width:auto">Send message</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const tokenKey = 'dashmod_admin_token';
+
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  const tok = localStorage.getItem(tokenKey);
+  if (tok) headers['X-Admin-Token'] = tok;
+  const res = await fetch(path, { ...opts, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function showApp() {
+  $('#login-view').style.display = 'none';
+  $('#app').classList.add('open');
+  refreshAll();
+}
+function showLogin() {
+  localStorage.removeItem(tokenKey);
+  $('#app').classList.remove('open');
+  $('#login-view').style.display = 'flex';
+}
+
+$('#login-btn').onclick = async () => {
+  $('#login-err').textContent = '';
+  try {
+    const data = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ password: $('#pw').value }) });
+    localStorage.setItem(tokenKey, data.token);
+    showApp();
+  } catch (e) {
+    $('#login-err').textContent = e.message || 'Login failed';
+  }
+};
+$('#pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#login-btn').click(); });
+$('#logout').onclick = showLogin;
+
+document.querySelectorAll('.nav button').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('[id^=tab-]').forEach((s) => s.classList.add('hidden'));
+    $('#tab-' + tab).classList.remove('hidden');
+    $('#page-title').textContent = btn.textContent;
+    $('#sidebar').classList.remove('open');
+    $('#overlay').classList.remove('show');
+  };
+});
+$('#menu-btn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); };
+$('#overlay').onclick = () => { $('#sidebar').classList.remove('open'); $('#overlay').classList.remove('show'); };
+
+function setSwitch(el, on) { el.classList.toggle('on', !!on); el.dataset.on = on ? '1' : '0'; }
+document.querySelectorAll('.switch').forEach((el) => {
+  el.onclick = () => setSwitch(el, el.dataset.on !== '1');
+});
+
+async function refreshAll() {
+  try {
+    const st = await api('/api/admin/status');
+    $('#st-tag').textContent = st.tag || '—';
+    $('#st-online').textContent = st.online ? 'Online' : 'Offline';
+    $('#bot-badge').textContent = st.online ? 'Online' : 'Offline';
+    $('#bot-badge').classList.toggle('off', !st.online);
+    $('#st-guilds').textContent = st.guilds ?? '—';
+    $('#st-ping').textContent = (st.ping != null ? st.ping + 'ms' : '—');
+    $('#st-uptime').textContent = st.uptime || '—';
+    setSwitch($('#sw-automod'), st.protection?.automod !== false);
+    setSwitch($('#sw-antiraid'), st.protection?.antiraid !== false);
+    setSwitch($('#sw-antinuke'), st.protection?.antinuke !== false);
+    $('#sync-ch').value = st.syncChannelId || '';
+    $('#ai-ch').value = st.aiChannelId || '';
+    $('#log-ch').value = st.logChannelId || '';
+    $('#ann-url').value = st.dashboardUrl || window.location.origin;
+
+    const inv = st.topInvites || [];
+    $('#invite-list').innerHTML = inv.length
+      ? inv.map((r, i) => `<div style="margin-bottom:6px"><strong>#${i+1}</strong> ${r.name} — <span style="color:var(--accent)">${r.total}</span></div>`).join('')
+      : 'No invite data yet.';
+    const msg = st.topMessages || [];
+    $('#msg-list').innerHTML = msg.length
+      ? msg.map((r, i) => `<div style="margin-bottom:6px"><strong>#${i+1}</strong> ${r.name} — <span style="color:var(--accent)">${r.count}</span></div>`).join('')
+      : 'No message data yet.';
+  } catch (e) {
+    if (/401|auth/i.test(e.message)) showLogin();
+    else toast(e.message);
+  }
+}
+
+$('#save-prot').onclick = async () => {
+  try {
+    await api('/api/admin/protection', {
+      method: 'POST',
+      body: JSON.stringify({
+        automod: $('#sw-automod').dataset.on === '1',
+        antiraid: $('#sw-antiraid').dataset.on === '1',
+        antinuke: $('#sw-antinuke').dataset.on === '1'
+      })
+    });
+    toast('Protection saved');
+  } catch (e) { toast(e.message); }
+};
+$('#save-sync').onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ syncChannelId: $('#sync-ch').value.trim() }) });
+    toast('Sync channel saved');
+  } catch (e) { toast(e.message); }
+};
+$('#save-ai').onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ aiChannelId: $('#ai-ch').value.trim() }) });
+    toast('AI channel saved');
+  } catch (e) { toast(e.message); }
+};
+$('#save-log').onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ logChannelId: $('#log-ch').value.trim() }) });
+    toast('Log channel saved');
+  } catch (e) { toast(e.message); }
+};
+$('#do-export').onclick = async () => {
+  try { await api('/api/admin/export', { method: 'POST', body: '{}' }); toast('Export sent'); }
+  catch (e) { toast(e.message); }
+};
+$('#do-import').onclick = async () => {
+  try { const r = await api('/api/admin/import', { method: 'POST', body: '{}' }); toast(r.ok ? 'Imported' : r.reason); }
+  catch (e) { toast(e.message); }
+};
+$('#do-announce').onclick = async () => {
+  try {
+    await api('/api/admin/announce', {
+      method: 'POST',
+      body: JSON.stringify({
+        channelId: $('#ann-ch').value.trim(),
+        dashboardUrl: $('#ann-url').value.trim(),
+        showPassword: $('#ann-show-pw').checked
+      })
+    });
+    toast('Message sent');
+  } catch (e) { toast(e.message); }
+};
+
+if (localStorage.getItem(tokenKey)) showApp();
+</script>
+</body>
+</html>
