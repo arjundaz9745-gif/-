@@ -225,11 +225,12 @@ client.on('messageCreate', async (message) => {
     }
     await message.channel.sendTyping().catch(() => {});
     const reply = await askAI(message.content);
-    if (reply?.text) {
+    if (reply && reply.text) {
       await message.reply({ content: reply.text, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
+      const err = (reply && reply.error) ? reply.error : ('bad reply: ' + typeof reply);
       await message.reply({
-        content: `AI error: ${reply?.error || 'unknown'}\nTip: for Groq use model \`llama-3.3-70b-versatile\` and key starting with \`gsk_\`.`
+        content: 'AI error: ' + err + '\nTip: env OPENAI_API_KEY=gsk_… and OPENAI_MODEL=llama-3.3-70b-versatile then redeploy.'
       }).catch(() => {});
     }
     return;
