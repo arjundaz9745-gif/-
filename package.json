@@ -1,0 +1,12 @@
+{
+  "name": "dashmod-bot",
+  "version": "1.0.0",
+  "description": "ᴅᴀꜱʜᴍᴏᴅ | ᴘɪɴɢ = ᴍᴜᴛᴇ — Coded by DashWho · Enhanced by DakshBro",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7"
+  },
+  "engines": { "node": ">=18" }
+}
