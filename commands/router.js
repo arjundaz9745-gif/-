@@ -10,6 +10,7 @@ const dataStore = require('../utils/data');
 const { buildInviteEmbed, ensureInviteStats, inviteBreakdown } = require('../systems/invites');
 const { exportToChannel, importFromChannel, scheduleExport } = require('../systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('../systems/giveaways');
+const { addMapping, removeMapping, listForMessage } = require('../systems/reactionRoles');
 
 async function handleCommand(message, client) {
   if (!message.content.startsWith(brand.PREFIX)) return false;
@@ -28,19 +29,45 @@ async function handleCommand(message, client) {
   };
 
   // ── HELP ──
-  if (cmd === 'help' || cmd === 'commands') {
+    if (cmd === 'help' || cmd === 'commands') {
     await message.reply({
       embeds: [
-        E(brand.BOT_NAME, [
-          '**Invites** `' + P + 'i` `' + P + 'lb i` `' + P + 'addinvite` `' + P + 'rmi`',
-          '**Messages** `' + P + 'm` `' + P + 'lb m`',
-          '**Mod** `' + P + 'ban` kick timeout warn purge lock slowmode role',
-          '**Giveaway** `' + P + 'gstart 1h 1 Prize` · `' + P + 'gend`',
-          '**Utility** si userinfo avatar ping afk snipe say poll steal',
-          '**Levels** `' + P + 'rank` `' + P + 'level`',
-          '**Setup** protection setlog setai setsync export import autorole stock dashboard staffroles',
+        E(brand.BOT_NAME + ' · Commands', [
+          '**Invites & stats**',
+          '`' + P + 'i` / `' + P + 'invites` [@user] — invite log',
+          '`' + P + 'addinvite` @user [n] — staff add invites',
+          '`' + P + 'rmi` [@user] [n] — remove invites',
+          '`' + P + 'm` / `' + P + 'messages` [@user]',
+          '`' + P + 'lb i` · `' + P + 'lb m` — leaderboards',
+          '`' + P + 'rank` / `' + P + 'level` [@user] — XP level',
           '',
-          'Slash: /help /invites /giveaway /purge /ban /kick /timeout …'
+          '**Moderation**',
+          '`' + P + 'ban` `' + P + 'kick` `' + P + 'timeout`/`' + P + 'mute` [duration]',
+          '`' + P + 'untimeout` `' + P + 'warn` `' + P + 'warnings` `' + P + 'softban` `' + P + 'unban`',
+          '`' + P + 'purge`/`' + P + 'clear` <1-100>',
+          '`' + P + 'lock` `' + P + 'unlock` `' + P + 'slowmode` `' + P + 'hide` `' + P + 'show`',
+          '`' + P + 'nick` `' + P + 'role add|remove` @user @role',
+          '',
+          '**Giveaways**',
+          '`' + P + 'gstart` <time> <winners> <prize> · `' + P + 'gend` <msgId>',
+          '',
+          '**Utility**',
+          '`' + P + 'si` `' + P + 'userinfo` `' + P + 'avatar` `' + P + 'banner`',
+          '`' + P + 'ping` `' + P + 'uptime` `' + P + 'botinfo` `' + P + 'membercount`',
+          '`' + P + 'afk` `' + P + 'snipe` `' + P + 'say` `' + P + 'embed` `' + P + 'poll` `' + P + 'steal`',
+          '',
+          '**Protection & setup** (staff)',
+          '`' + P + 'protection` [automod|antiraid on/off]',
+          '`' + P + 'setlog` `' + P + 'setai` `' + P + 'setsync` #channel',
+          '`' + P + 'export` `' + P + 'import` · `' + P + 'autorole` `' + P + 'autoreact`',
+          '`' + P + 'stock` `' + P + 'stockadd` · `' + P + 'staffroles`',
+          '',
+          '**Owner**',
+          '`' + P + 'dashboard` [#channel|@user] — panel link (owners only)',
+          '',
+          '**Slash** `/help` `/invites` `/giveaway` `/purge` `/ban` `/kick` `/timeout` `/serverinfo` …',
+          '',
+          '*Coded by DashWho · Enhanced by DakshBro*'
         ].join('\n'))
       ]
     });
@@ -476,6 +503,103 @@ async function handleCommand(message, client) {
     await message.reply({ embeds: [E('Import', r.ok ? r.at || 'OK' : r.reason, r.ok ? brand.green : brand.red)] });
     return true;
   }
+
+  // ── REACTION ROLES ──
+  if (cmd === 'rr' || cmd === 'reactionrole' || cmd === 'reactionroles') {
+    if (!needStaff()) return true;
+    const sub = (args[0] || 'help').toLowerCase();
+
+    if (sub === 'help' || sub === '') {
+      await message.reply({
+        embeds: [E('Reaction roles', [
+          '`' + P + 'rr panel` — post a roles panel (then add emojis)',
+          '`' + P + 'rr add <messageId> <emoji> @role` — bind emoji → role',
+          '`' + P + 'rr remove <messageId> <emoji>` — unbind',
+          '`' + P + 'rr list <messageId>` — list bindings',
+          '',
+          'Example:',
+          '1. `' + P + 'rr panel`',
+          '2. `' + P + 'rr add MESSAGE_ID 🎉 @Events Ping`',
+          '3. Bot reacts; members click emoji to get the role'
+        ].join('\n'))]
+      });
+      return true;
+    }
+
+    if (sub === 'panel') {
+      const title = args.slice(1).join(' ') || 'Self roles';
+      const emb = E(title, 'React below to get roles.\nStaff: use `' + P + 'rr add <msgId> <emoji> @role` on this message.');
+      const panel = await message.channel.send({ embeds: [emb] });
+      await message.reply({ embeds: [E('Panel', 'Message ID: `' + panel.id + '`\nUse: `' + P + 'rr add ' + panel.id + ' 🎉 @Role`', brand.green)] });
+      return true;
+    }
+
+    if (sub === 'add') {
+      const messageId = args[1];
+      const emojiRaw = args[2];
+      const role = message.mentions.roles.first();
+      if (!messageId || !emojiRaw || !role) {
+        await message.reply('`' + P + 'rr add <messageId> <emoji> @role`');
+        return true;
+      }
+      const r = addMapping(message.guild.id, messageId, emojiRaw, role.id);
+      if (!r.ok) {
+        await message.reply({ embeds: [E('RR', 'Failed to bind.', brand.red)] });
+        return true;
+      }
+      // try react on target message
+      try {
+        const target = await message.channel.messages.fetch(messageId).catch(() => null)
+          || await message.guild.channels.cache
+            .filter((c) => c.isTextBased?.())
+            .reduce(async (acc, ch) => {
+              const a = await acc;
+              if (a) return a;
+              return ch.messages.fetch(messageId).catch(() => null);
+            }, Promise.resolve(null));
+        if (target) await target.react(emojiRaw).catch(() => {});
+      } catch (_) {}
+      await message.reply({
+        embeds: [E('Reaction role', '**' + emojiRaw + '** → **' + role.name + '**\non `' + messageId + '`', brand.green)]
+      });
+      return true;
+    }
+
+    if (sub === 'remove') {
+      const messageId = args[1];
+      const emojiRaw = args[2];
+      if (!messageId || !emojiRaw) {
+        await message.reply('`' + P + 'rr remove <messageId> <emoji>`');
+        return true;
+      }
+      removeMapping(message.guild.id, messageId, emojiRaw);
+      await message.reply({ embeds: [E('Reaction role', 'Removed **' + emojiRaw + '** from `' + messageId + '`', brand.green)] });
+      return true;
+    }
+
+    if (sub === 'list') {
+      const messageId = args[1];
+      if (!messageId) {
+        await message.reply('`' + P + 'rr list <messageId>`');
+        return true;
+      }
+      const list = listForMessage(message.guild.id, messageId);
+      if (!list.length) {
+        await message.reply({ embeds: [E('Reaction roles', 'None on that message.')] });
+        return true;
+      }
+      const lines = list.map((r) => {
+        const role = message.guild.roles.cache.get(r.roleId);
+        return (r.emoji.length > 12 ? '<:e:' + r.emoji + '>' : r.emoji) + ' → **' + (role ? role.name : r.roleId) + '**';
+      });
+      await message.reply({ embeds: [E('Reaction roles', lines.join('\n'))] });
+      return true;
+    }
+
+    await message.reply('`' + P + 'rr help`');
+    return true;
+  }
+
   if (cmd === 'autorole') {
     if (!needStaff()) return true;
     if ((args[0] || '').toLowerCase() === 'off') {
@@ -537,19 +661,36 @@ async function handleCommand(message, client) {
     await message.reply({ embeds: [E('Stock', `**${name}** · ${data.stocks[name].length}`, brand.green)] });
     return true;
   }
-  if (cmd === 'dashboard' || cmd === 'panel') {
-    if (!needStaff()) return true;
-    const ch = message.mentions.channels.first() || message.channel;
+    if (cmd === 'dashboard' || cmd === 'panel') {
+    const ownerIds = [ROLE.OWNER, ROLE.CO_OWNER, ROLE.FOUNDER].filter(Boolean);
+    const isOwner =
+      message.member.permissions.has(PermissionFlagsBits.Administrator) ||
+      ownerIds.some((id) => message.member.roles.cache.has(id)) ||
+      message.author.id === env.PROTECTED_USER_ID ||
+      (env.PROTECTED_USER_IDS || []).includes(message.author.id);
+    if (!isOwner) {
+      await message.reply({ embeds: [E('Denied', 'Owner / Co-Owner / Founder only.', brand.red)] });
+      return true;
+    }
     const url = (env.DASHBOARD_URL || '').replace(/\/$/, '') || 'Set DASHBOARD_URL in env';
-    await ch.send({
-      embeds: [
-        E(
-          'ᴅᴀꜱʜᴍᴏᴅ · Admin panel',
-          `**Dashboard**\n${url}\n\n**Admin password**\n||${env.ADMIN_PASSWORD}||\n\nSign in to manage protection, sync, AI, and stats.`
-        )
-      ]
-    });
-    await message.reply({ embeds: [E('Dashboard', `Posted in ${ch}`, brand.green)] });
+    const emb = E(
+      'ᴅᴀꜱʜᴍᴏᴅ · Admin panel',
+      '**Dashboard**\n' + url + '\n\n**Admin password**\n||' + env.ADMIN_PASSWORD + '||\n\n' +
+        'Sign in to manage protection, giveaways, sync, AI, and stats.\n\n*Coded by DashWho · Enhanced by DakshBro*'
+    );
+    const targetUser = message.mentions.users.first();
+    if (targetUser) {
+      try {
+        await targetUser.send({ embeds: [emb] });
+        await message.reply({ embeds: [E('Dashboard', 'Sent to **' + targetUser.username + '** DM', brand.green)] });
+      } catch (_) {
+        await message.reply({ embeds: [E('Dashboard', 'Could not DM that user (DMs closed).', brand.red)] });
+      }
+      return true;
+    }
+    const ch = message.mentions.channels.first() || message.channel;
+    await ch.send({ embeds: [emb] });
+    await message.reply({ embeds: [E('Dashboard', 'Posted in ' + String(ch), brand.green)] });
     return true;
   }
   if (cmd === 'staffroles' || cmd === 'ranks' || cmd === 'hierarchy') {
