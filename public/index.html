@@ -6,139 +6,152 @@
 <title>ᴅᴀꜱʜᴍᴏᴅ · Panel</title>
 <style>
 :root{
-  --bg:#0e1015; --panel:#161a22; --panel2:#1c212b; --border:#2a3140;
-  --text:#e8eaed; --muted:#8b95a8; --accent:#1abc9c; --accent2:#16a085;
-  --danger:#e74c3c; --warn:#f1c40f; --ok:#2ecc71;
-  --sidebar:260px; --radius:10px;
+  --bg:#0b0d12; --panel:rgba(18,22,30,.55); --panel2:rgba(28,34,48,.65);
+  --border:rgba(255,255,255,.08); --text:#eef1f6; --muted:#9aa3b5;
+  --accent:#1abc9c; --accent2:#16a085; --danger:#e74c3c; --ok:#2ecc71; --warn:#f1c40f;
+  --sidebar:270px; --radius:14px; --blur:22px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+html,body{height:100%;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text)}
 body{
-  background:
-    linear-gradient(135deg, rgba(14,16,21,.88) 0%, rgba(14,16,21,.72) 45%, rgba(14,16,21,.9) 100%),
-    url('/public/bg-desktop.jpg') center/cover fixed;
   min-height:100vh;
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(26,188,156,.18), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(88,101,242,.12), transparent 50%),
+    linear-gradient(160deg, rgba(8,10,14,.55) 0%, rgba(8,10,14,.35) 40%, rgba(8,10,14,.7) 100%),
+    url('/public/bg-desktop.jpg') center/cover fixed;
 }
-@media (max-width:768px){
-  body{background-attachment:scroll;background-size:cover}
+@media (max-width:768px){ body{background-attachment:scroll} }
+
+.glass{
+  background:var(--panel);
+  border:1px solid var(--border);
+  backdrop-filter:blur(var(--blur)) saturate(1.2);
+  -webkit-backdrop-filter:blur(var(--blur)) saturate(1.2);
+  border-radius:var(--radius);
+  box-shadow:0 12px 40px rgba(0,0,0,.35);
 }
 
 /* LOGIN */
-#login-view{
-  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
-}
-.login-card{
-  width:100%;max-width:400px;background:rgba(22,26,34,.92);border:1px solid var(--border);
-  border-radius:16px;padding:32px 28px;backdrop-filter:blur(18px);box-shadow:0 20px 60px rgba(0,0,0,.45);
-}
-.login-card h1{font-size:1.25rem;font-weight:700;margin-bottom:4px;letter-spacing:.02em}
-.login-card .sub{color:var(--muted);font-size:.85rem;margin-bottom:24px}
-.login-card label{display:block;font-size:.75rem;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
+#login-view{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{width:100%;max-width:420px;padding:36px 30px}
+.login-card h1{font-size:1.35rem;font-weight:700;letter-spacing:.03em}
+.login-card .sub{color:var(--muted);font-size:.88rem;margin:6px 0 26px}
+.login-card label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em}
 .login-card input{
-  width:100%;padding:12px 14px;border-radius:8px;border:1px solid var(--border);
-  background:var(--panel2);color:var(--text);font-size:1rem;margin-bottom:16px;outline:none;
+  width:100%;padding:13px 14px;border-radius:10px;border:1px solid var(--border);
+  background:rgba(0,0,0,.25);color:var(--text);font-size:1rem;margin-bottom:16px;outline:none;
+  backdrop-filter:blur(8px);
 }
-.login-card input:focus{border-color:var(--accent)}
+.login-card input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,188,156,.2)}
 .btn{
   display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  padding:12px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:.9rem;
-  transition:background .15s,transform .1s;
+  padding:12px 18px;border-radius:10px;border:1px solid transparent;cursor:pointer;
+  font-weight:600;font-size:.9rem;transition:all .15s;
 }
 .btn:active{transform:scale(.98)}
-.btn-primary{background:var(--accent);color:#0a0c10;width:100%}
-.btn-primary:hover{background:var(--accent2)}
-.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
-.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
-.btn-danger{background:var(--danger);color:#fff}
-.err{color:var(--danger);font-size:.85rem;margin-bottom:12px;min-height:1.2em}
-.brand-foot{margin-top:20px;text-align:center;font-size:.72rem;color:var(--muted);line-height:1.5}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#06110e;width:100%;border:none}
+.btn-primary:hover{filter:brightness(1.08)}
+.btn-ghost{background:rgba(255,255,255,.04);border-color:var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent);background:rgba(26,188,156,.08)}
+.btn-danger{background:rgba(231,76,60,.2);border-color:rgba(231,76,60,.35);color:#ffb4ae}
+.err{color:#ff8a80;font-size:.85rem;margin-bottom:12px;min-height:1.2em}
+.brand-foot{margin-top:22px;text-align:center;font-size:.72rem;color:var(--muted);line-height:1.55}
 
-/* APP SHELL */
+/* APP */
 #app{display:none;min-height:100vh}
 #app.open{display:flex}
 .sidebar{
-  width:var(--sidebar);flex-shrink:0;background:rgba(14,16,21,.94);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;backdrop-filter:blur(16px);position:fixed;inset:0 auto 0 0;z-index:40;
-  transform:translateX(0);transition:transform .2s;
+  width:var(--sidebar);flex-shrink:0;position:fixed;inset:0 auto 0 0;z-index:40;
+  display:flex;flex-direction:column;
+  background:rgba(10,12,18,.55);border-right:1px solid var(--border);
+  backdrop-filter:blur(28px) saturate(1.3);-webkit-backdrop-filter:blur(28px) saturate(1.3);
+  transition:transform .22s;
 }
-.sidebar .logo{padding:22px 20px 12px;border-bottom:1px solid var(--border)}
-.sidebar .logo h2{font-size:1rem;font-weight:700}
-.sidebar .logo p{font-size:.7rem;color:var(--muted);margin-top:4px}
-.nav{padding:12px 10px;flex:1;overflow:auto}
+.sidebar .logo{padding:24px 20px 14px;border-bottom:1px solid var(--border)}
+.sidebar .logo h2{font-size:1.05rem;font-weight:700}
+.sidebar .logo p{font-size:.72rem;color:var(--muted);margin-top:4px}
+.nav{padding:14px 12px;flex:1;overflow:auto}
 .nav button{
-  width:100%;text-align:left;padding:10px 12px;margin-bottom:4px;border:none;border-radius:8px;
+  width:100%;text-align:left;padding:11px 13px;margin-bottom:5px;border:none;border-radius:10px;
   background:transparent;color:var(--muted);cursor:pointer;font-size:.88rem;font-weight:500;
+  transition:background .12s,color .12s;
 }
-.nav button:hover,.nav button.active{background:rgba(26,188,156,.12);color:var(--accent)}
-.side-foot{padding:14px 16px;border-top:1px solid var(--border);font-size:.68rem;color:var(--muted);line-height:1.45}
+.nav button:hover,.nav button.active{background:rgba(26,188,156,.14);color:var(--accent)}
+.side-foot{padding:14px 16px;border-top:1px solid var(--border);font-size:.68rem;color:var(--muted);line-height:1.5}
 
 .main{margin-left:var(--sidebar);flex:1;min-height:100vh;display:flex;flex-direction:column}
 .topbar{
-  height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;
-  border-bottom:1px solid var(--border);background:rgba(14,16,21,.75);backdrop-filter:blur(12px);
+  height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;
+  border-bottom:1px solid var(--border);
+  background:rgba(10,12,18,.45);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
   position:sticky;top:0;z-index:20;
 }
 .topbar h3{font-size:.95rem;font-weight:600}
-.topbar .right{display:flex;gap:10px;align-items:center}
-.badge{font-size:.7rem;padding:4px 8px;border-radius:999px;background:rgba(46,204,113,.15);color:var(--ok);border:1px solid rgba(46,204,113,.3)}
-.badge.off{background:rgba(231,76,60,.15);color:var(--danger);border-color:rgba(231,76,60,.3)}
+.badge{font-size:.7rem;padding:4px 10px;border-radius:999px;background:rgba(46,204,113,.15);color:var(--ok);border:1px solid rgba(46,204,113,.3)}
+.badge.off{background:rgba(231,76,60,.15);color:#ff8a80;border-color:rgba(231,76,60,.35)}
 
-.content{padding:22px;flex:1}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:20px}
-.card{
-  background:rgba(22,26,34,.9);border:1px solid var(--border);border-radius:var(--radius);
-  padding:16px 18px;backdrop-filter:blur(10px);
-}
-.card .label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
-.card .value{font-size:1.5rem;font-weight:700;margin-top:6px}
+.content{padding:22px;flex:1;max-width:1200px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:18px}
+.card{padding:16px 18px}
+.card .label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.card .value{font-size:1.45rem;font-weight:700;margin-top:6px}
 .card .hint{font-size:.75rem;color:var(--muted);margin-top:6px}
 
-.panel{
-  background:rgba(22,26,34,.92);border:1px solid var(--border);border-radius:var(--radius);
-  padding:18px 20px;margin-bottom:16px;backdrop-filter:blur(12px);
-}
-.panel h4{font-size:.9rem;margin-bottom:12px;font-weight:600}
+.panel{padding:18px 20px;margin-bottom:16px}
+.panel h4{font-size:.92rem;margin-bottom:12px;font-weight:600}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px}
 .toggle{
-  display:flex;align-items:center;justify-content:space-between;padding:10px 12px;
-  background:var(--panel2);border-radius:8px;border:1px solid var(--border);margin-bottom:8px;
+  display:flex;align-items:center;justify-content:space-between;padding:12px 14px;
+  background:rgba(0,0,0,.22);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;
+  backdrop-filter:blur(8px);
 }
 .toggle span{font-size:.88rem}
 .switch{
-  width:42px;height:24px;border-radius:999px;background:#3a4254;position:relative;cursor:pointer;border:none;
+  width:44px;height:26px;border-radius:999px;background:rgba(255,255,255,.12);position:relative;cursor:pointer;border:none;
 }
 .switch.on{background:var(--accent)}
 .switch::after{
-  content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s;
+  content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s;
 }
 .switch.on::after{left:21px}
 input[type=text],input[type=password],select,textarea{
-  background:var(--panel2);border:1px solid var(--border);border-radius:8px;color:var(--text);
-  padding:10px 12px;font-size:.9rem;outline:none;width:100%;max-width:420px;
+  background:rgba(0,0,0,.28);border:1px solid var(--border);border-radius:10px;color:var(--text);
+  padding:11px 13px;font-size:.9rem;outline:none;width:100%;max-width:460px;
+  backdrop-filter:blur(8px);
 }
+input:focus,textarea:focus{border-color:var(--accent)}
 textarea{min-height:90px;resize:vertical}
-.menu-btn{display:none;background:transparent;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px}
+.menu-btn{display:none;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:10px}
+.list-item{
+  padding:12px 14px;margin-bottom:8px;border-radius:10px;background:rgba(0,0,0,.2);
+  border:1px solid var(--border);font-size:.88rem;
+}
+.list-item strong{color:var(--accent)}
+.chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.7rem;background:rgba(26,188,156,.15);color:var(--accent);margin-left:6px}
+.chip.warn{background:rgba(241,196,15,.15);color:var(--warn)}
+.chip.off{background:rgba(231,76,60,.15);color:#ff8a80}
 
 @media (max-width:900px){
   .sidebar{transform:translateX(-100%)}
   .sidebar.open{transform:translateX(0)}
   .main{margin-left:0}
   .menu-btn{display:inline-flex}
-  .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:30}
+  .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);z-index:30}
   .overlay.show{display:block}
 }
 .hidden{display:none!important}
 .toast{
-  position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--border);
-  padding:12px 16px;border-radius:10px;font-size:.85rem;z-index:100;box-shadow:0 10px 30px rgba(0,0,0,.4);
-  display:none;
+  position:fixed;bottom:22px;right:22px;padding:13px 16px;border-radius:12px;font-size:.85rem;z-index:100;
+  background:rgba(18,22,30,.85);border:1px solid var(--border);backdrop-filter:blur(16px);
+  box-shadow:0 12px 40px rgba(0,0,0,.4);display:none;
 }
 .toast.show{display:block}
 </style>
 </head>
 <body>
 <div id="login-view">
-  <div class="login-card">
+  <div class="login-card glass">
     <h1>ᴅᴀꜱʜᴍᴏᴅ</h1>
     <p class="sub">Admin panel · Ping = Mute</p>
     <div class="err" id="login-err"></div>
@@ -159,9 +172,14 @@ textarea{min-height:90px;resize:vertical}
     <nav class="nav">
       <button class="active" data-tab="overview">Overview</button>
       <button data-tab="protection">Protection</button>
+      <button data-tab="giveaways">Giveaways</button>
       <button data-tab="invites">Invites & Messages</button>
       <button data-tab="sync">Sync / Export</button>
-      <button data-tab="channels">Channels</button>
+      <button data-tab="channels">Channels & AI</button>
+      <button data-tab="ping">Ping protect</button>
+      <button data-tab="antinuke">Anti-nuke</button>
+      <button data-tab="reactionroles">Reaction roles</button>
+      <button data-tab="commands">Commands</button>
       <button data-tab="announce">Announce link</button>
     </nav>
     <div class="side-foot">Coded by DashWho<br/>Enhanced by DakshBro</div>
@@ -172,32 +190,32 @@ textarea{min-height:90px;resize:vertical}
         <button class="menu-btn" id="menu-btn">☰</button>
         <h3 id="page-title">Overview</h3>
       </div>
-      <div class="right">
+      <div style="display:flex;gap:10px;align-items:center">
         <span class="badge" id="bot-badge">…</span>
         <button class="btn btn-ghost" id="logout" style="padding:8px 12px;font-size:.8rem">Logout</button>
       </div>
     </header>
     <div class="content">
-      <!-- OVERVIEW -->
       <section id="tab-overview">
         <div class="grid">
-          <div class="card"><div class="label">Bot</div><div class="value" id="st-tag">—</div><div class="hint" id="st-online">status</div></div>
-          <div class="card"><div class="label">Guilds</div><div class="value" id="st-guilds">—</div><div class="hint">connected</div></div>
-          <div class="card"><div class="label">Ping</div><div class="value" id="st-ping">—</div><div class="hint">websocket</div></div>
-          <div class="card"><div class="label">Uptime</div><div class="value" id="st-uptime">—</div><div class="hint">process</div></div>
+          <div class="card glass"><div class="label">Bot</div><div class="value" id="st-tag">—</div><div class="hint" id="st-online">status</div></div>
+          <div class="card glass"><div class="label">Guilds</div><div class="value" id="st-guilds">—</div><div class="hint">connected</div></div>
+          <div class="card glass"><div class="label">Ping</div><div class="value" id="st-ping">—</div><div class="hint">websocket</div></div>
+          <div class="card glass"><div class="label">Uptime</div><div class="value" id="st-uptime">—</div><div class="hint">process</div></div>
+          <div class="card glass"><div class="label">Active GWs</div><div class="value" id="st-gw">—</div><div class="hint">running giveaways</div></div>
+          <div class="card glass"><div class="label">AI key</div><div class="value" id="st-ai" style="font-size:1rem">—</div><div class="hint">env configured</div></div>
         </div>
-        <div class="panel">
+        <div class="panel glass">
           <h4>Quick status</h4>
-          <p style="color:var(--muted);font-size:.88rem;line-height:1.5">Protection, AI channel, and sync run from this panel. Changes save to bot memory and can export to your sync channel.</p>
+          <p style="color:var(--muted);font-size:.88rem;line-height:1.55">Manage protection, giveaways, sync, AI channel, and stats from this panel. Background stays visible under glass layers.</p>
         </div>
       </section>
 
-      <!-- PROTECTION -->
       <section id="tab-protection" class="hidden">
-        <div class="panel">
+        <div class="panel glass">
           <h4>Modules</h4>
-          <div class="toggle"><span>Automod</span><button class="switch" id="sw-automod"></button></div>
-          <div class="toggle"><span>Anti-raid</span><button class="switch" id="sw-antiraid"></button></div>
+          <div class="toggle"><span>Automod (spam)</span><button class="switch" id="sw-automod"></button></div>
+          <div class="toggle"><span>Anti-raid (mass join)</span><button class="switch" id="sw-antiraid"></button></div>
           <div class="toggle"><span>Anti-nuke</span><button class="switch" id="sw-antinuke"></button></div>
           <div class="row" style="margin-top:14px">
             <button class="btn btn-primary" id="save-prot" style="width:auto">Save protection</button>
@@ -205,61 +223,132 @@ textarea{min-height:90px;resize:vertical}
         </div>
       </section>
 
-      <!-- INVITES -->
+      <section id="tab-giveaways" class="hidden">
+        <div class="panel glass">
+          <h4>Active giveaways</h4>
+          <div id="gw-list" style="color:var(--muted);font-size:.88rem">Loading…</div>
+        </div>
+        <div class="panel glass">
+          <h4>Ended (recent)</h4>
+          <div id="gw-ended" style="color:var(--muted);font-size:.88rem">—</div>
+        </div>
+      </section>
+
       <section id="tab-invites" class="hidden">
-        <div class="panel">
-          <h4>Invite stats (top)</h4>
+        <div class="panel glass">
+          <h4>Invite leaderboard</h4>
           <div id="invite-list" style="font-size:.88rem;color:var(--muted)">Loading…</div>
         </div>
-        <div class="panel">
-          <h4>Message stats (top)</h4>
+        <div class="panel glass">
+          <h4>Message leaderboard</h4>
           <div id="msg-list" style="font-size:.88rem;color:var(--muted)">Loading…</div>
         </div>
       </section>
 
-      <!-- SYNC -->
       <section id="tab-sync" class="hidden">
-        <div class="panel">
+        <div class="panel glass">
           <h4>Sync channel ID</h4>
           <input type="text" id="sync-ch" placeholder="Channel snowflake"/>
           <div class="row" style="margin-top:12px">
-            <button class="btn btn-primary" id="save-sync" style="width:auto">Save sync channel</button>
+            <button class="btn btn-primary" id="save-sync" style="width:auto">Save</button>
             <button class="btn btn-ghost" id="do-export" style="width:auto">Export now</button>
             <button class="btn btn-ghost" id="do-import" style="width:auto">Import now</button>
           </div>
-          <p style="margin-top:12px;font-size:.8rem;color:var(--muted)">Auto-import every 5 minutes · export on data changes</p>
+          <p style="margin-top:12px;font-size:.8rem;color:var(--muted)">Auto-import every 5 minutes</p>
         </div>
       </section>
 
-      <!-- CHANNELS -->
       <section id="tab-channels" class="hidden">
-        <div class="panel">
+        <div class="panel glass">
           <h4>AI channel ID</h4>
           <input type="text" id="ai-ch" placeholder="AI chat channel snowflake"/>
-          <div class="row" style="margin-top:12px">
-            <button class="btn btn-primary" id="save-ai" style="width:auto">Save AI channel</button>
-          </div>
+          <p style="margin:8px 0 12px;font-size:.8rem;color:var(--muted)">Messages in this channel (without <code>-</code> prefix) go to AI.</p>
+          <button class="btn btn-primary" id="save-ai" style="width:auto">Save AI channel</button>
         </div>
-        <div class="panel">
+        <div class="panel glass">
           <h4>Log channel ID</h4>
           <input type="text" id="log-ch" placeholder="Protection log channel"/>
           <div class="row" style="margin-top:12px">
             <button class="btn btn-primary" id="save-log" style="width:auto">Save log channel</button>
           </div>
         </div>
+        <div class="panel glass">
+          <h4>AI env tip</h4>
+          <p style="font-size:.85rem;color:var(--muted);line-height:1.5">
+            Groq: <code>OPENAI_API_KEY=gsk_…</code><br/>
+            Model: <code>OPENAI_MODEL=llama-3.3-70b-versatile</code>
+          </p>
+        </div>
       </section>
 
-      <!-- ANNOUNCE -->
-      <section id="tab-announce" class="hidden">
-        <div class="panel">
+      <section id="tab-commands" class="hidden">
+        <div class="panel glass">
+          <h4>Prefix commands (<code>-</code>)</h4>
+          <div style="font-size:.85rem;line-height:1.65;color:var(--muted)">
+            <p><strong style="color:var(--text)">Invites</strong> — -i -invites -addinvite -rmi -lb i</p>
+            <p><strong style="color:var(--text)">Messages</strong> — -m -lb m -rank -level</p>
+            <p><strong style="color:var(--text)">Mod</strong> — -ban -kick -timeout -warn -purge -lock -unlock -slowmode -role -nick</p>
+            <p><strong style="color:var(--text)">Giveaway</strong> — -gstart 1h 1 Prize · -gend</p>
+            <p><strong style="color:var(--text)">Utility</strong> — -si -userinfo -avatar -ping -afk -snipe -say -poll -steal</p>
+            <p><strong style="color:var(--text)">Setup</strong> — -protection -setai -setsync -export -import -autorole -stock -staffroles</p>
+            <p><strong style="color:var(--text)">Owner</strong> — -dashboard [#ch|@user]</p>
+            <p style="margin-top:10px"><strong style="color:var(--text)">Slash</strong> — /help /invites /giveaway /purge /ban /kick /timeout /serverinfo /avatar /ping</p>
+          </div>
+        </div>
+      </section>
+
+      
+      <section id="tab-ping" class="hidden">
+        <div class="panel glass">
+          <h4>Ping = Mute system</h4>
+          <p style="font-size:.88rem;color:var(--muted);line-height:1.55;margin-bottom:12px">
+            If a member’s nickname/display contains <strong>Ping = Mute</strong> (any fancy font),
+            pinging them timeouts the pinger for 1 hour.<br/>
+            <strong>Ping = Warn</strong> / <strong>Ping = Help</strong> also detected.<br/>
+            Staff ranks are exempt.
+          </p>
+          <p style="font-size:.88rem;color:var(--muted);line-height:1.55">
+            <strong>Protected users</strong> (env <code>PROTECTED_USER_IDS</code>): first ping warns with status;
+            second ping → 1h timeout.
+          </p>
+        </div>
+      </section>
+
+      <section id="tab-antinuke" class="hidden">
+        <div class="panel glass">
+          <h4>Anti-nuke rules</h4>
+          <p style="font-size:.88rem;color:var(--muted);line-height:1.6">
+            <strong>Trusted</strong> (allowed to create channels/roles): Founder, Owner, Co-Owner, Manager, Head Admin<br/><br/>
+            <strong>Restricted</strong> (timeout 3 days + undo): Trial Staff, Stocker, Staff Team, Admin, Discord Dev<br/><br/>
+            Actions watched: channel/category create &amp; delete, role create &amp; delete, mass bans.<br/>
+            Bot needs <strong>View Audit Log</strong>, Moderate Members, Manage Channels/Roles.
+          </p>
+        </div>
+      </section>
+
+      <section id="tab-reactionroles" class="hidden">
+        <div class="panel glass">
+          <h4>Reaction roles setup</h4>
+          <p style="font-size:.88rem;color:var(--muted);line-height:1.65">
+            In Discord (staff):<br/>
+            <code>-rr setup 🎉 @Events 📢 @Announce</code><br/><br/>
+            Posts a message: “React with 🎉 to get Events…” and assigns roles on react.<br/>
+            Bot role must be <strong>above</strong> those roles and have Manage Roles.<br/><br/>
+            After every redeploy, run <code>-rr setup</code> again (Render storage is temporary).
+          </p>
+        </div>
+      </section>
+
+<section id="tab-announce" class="hidden">
+        <div class="panel glass">
           <h4>Post dashboard access message</h4>
-          <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Sends a clean embed to a channel with the panel link. Password is only shown if you check the box (staff-only channels recommended).</p>
-          <label style="font-size:.75rem;color:var(--muted)">Channel ID</label>
+          <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Clean embed with panel link. Password only if checked (use private staff channels).</p>
+          <label style="font-size:.72rem;color:var(--muted)">Channel ID</label>
           <input type="text" id="ann-ch" placeholder="Channel to post in" style="margin-bottom:10px"/>
-          <label style="font-size:.75rem;color:var(--muted)">Dashboard URL (your Render URL)</label>
+          <label style="font-size:.72rem;color:var(--muted)">Dashboard URL</label>
           <input type="text" id="ann-url" placeholder="https://your-service.onrender.com" style="margin-bottom:10px"/>
           <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin-bottom:12px;cursor:pointer">
-            <input type="checkbox" id="ann-show-pw"/> Include admin password in message
+            <input type="checkbox" id="ann-show-pw"/> Include admin password
           </label>
           <button class="btn btn-primary" id="do-announce" style="width:auto">Send message</button>
         </div>
@@ -268,156 +357,82 @@ textarea{min-height:90px;resize:vertical}
   </div>
 </div>
 <div class="toast" id="toast"></div>
-
 <script>
 const $ = (s) => document.querySelector(s);
 const tokenKey = 'dashmod_admin_token';
-
-function toast(msg) {
-  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2800);
-}
-
-async function api(path, opts = {}) {
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
-  const tok = localStorage.getItem(tokenKey);
-  if (tok) headers['X-Admin-Token'] = tok;
-  const res = await fetch(path, { ...opts, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800)}
+async function api(path, opts={}){
+  const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
+  const tok=localStorage.getItem(tokenKey); if(tok) headers['X-Admin-Token']=tok;
+  const res=await fetch(path,{...opts,headers});
+  const data=await res.json().catch(()=>({}));
+  if(!res.ok) throw new Error(data.error||res.statusText);
   return data;
 }
-
-function showApp() {
-  $('#login-view').style.display = 'none';
-  $('#app').classList.add('open');
-  refreshAll();
-}
-function showLogin() {
-  localStorage.removeItem(tokenKey);
-  $('#app').classList.remove('open');
-  $('#login-view').style.display = 'flex';
-}
-
-$('#login-btn').onclick = async () => {
-  $('#login-err').textContent = '';
-  try {
-    const data = await api('/api/admin/login', { method: 'POST', body: JSON.stringify({ password: $('#pw').value }) });
-    localStorage.setItem(tokenKey, data.token);
-    showApp();
-  } catch (e) {
-    $('#login-err').textContent = e.message || 'Login failed';
-  }
+function showApp(){$('#login-view').style.display='none';$('#app').classList.add('open');refreshAll()}
+function showLogin(){localStorage.removeItem(tokenKey);$('#app').classList.remove('open');$('#login-view').style.display='flex'}
+$('#login-btn').onclick=async()=>{
+  $('#login-err').textContent='';
+  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value})});localStorage.setItem(tokenKey,d.token);showApp()}
+  catch(e){$('#login-err').textContent=e.message||'Login failed'}
 };
-$('#pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#login-btn').click(); });
-$('#logout').onclick = showLogin;
-
-document.querySelectorAll('.nav button').forEach((btn) => {
-  btn.onclick = () => {
-    document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'));
+$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login-btn').click()});
+$('#logout').onclick=showLogin;
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.onclick=()=>{
+    document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('[id^=tab-]').forEach((s) => s.classList.add('hidden'));
-    $('#tab-' + tab).classList.remove('hidden');
-    $('#page-title').textContent = btn.textContent;
-    $('#sidebar').classList.remove('open');
-    $('#overlay').classList.remove('show');
+    const tab=btn.dataset.tab;
+    document.querySelectorAll('[id^=tab-]').forEach(s=>s.classList.add('hidden'));
+    $('#tab-'+tab).classList.remove('hidden');
+    $('#page-title').textContent=btn.textContent;
+    $('#sidebar').classList.remove('open');$('#overlay').classList.remove('show');
   };
 });
-$('#menu-btn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); };
-$('#overlay').onclick = () => { $('#sidebar').classList.remove('open'); $('#overlay').classList.remove('show'); };
+$('#menu-btn').onclick=()=>{$('#sidebar').classList.add('open');$('#overlay').classList.add('show')};
+$('#overlay').onclick=()=>{$('#sidebar').classList.remove('open');$('#overlay').classList.remove('show')};
+function setSwitch(el,on){el.classList.toggle('on',!!on);el.dataset.on=on?'1':'0'}
+document.querySelectorAll('.switch').forEach(el=>{el.onclick=()=>setSwitch(el,el.dataset.on!=='1')});
 
-function setSwitch(el, on) { el.classList.toggle('on', !!on); el.dataset.on = on ? '1' : '0'; }
-document.querySelectorAll('.switch').forEach((el) => {
-  el.onclick = () => setSwitch(el, el.dataset.on !== '1');
-});
+async function refreshAll(){
+  try{
+    const st=await api('/api/admin/status');
+    $('#st-tag').textContent=st.tag||'—';
+    $('#st-online').textContent=st.online?'Online':'Offline';
+    $('#bot-badge').textContent=st.online?'Online':'Offline';
+    $('#bot-badge').classList.toggle('off',!st.online);
+    $('#st-guilds').textContent=st.guilds??'—';
+    $('#st-ping').textContent=st.ping!=null?st.ping+'ms':'—';
+    $('#st-uptime').textContent=st.uptime||'—';
+    $('#st-gw').textContent=st.activeGiveaways??0;
+    $('#st-ai').textContent=st.aiConfigured?'Set':'Missing';
+    setSwitch($('#sw-automod'),st.protection?.automod!==false);
+    setSwitch($('#sw-antiraid'),st.protection?.antiraid!==false);
+    setSwitch($('#sw-antinuke'),st.protection?.antinuke!==false);
+    $('#sync-ch').value=st.syncChannelId||'';
+    $('#ai-ch').value=st.aiChannelId||'';
+    $('#log-ch').value=st.logChannelId||'';
+    $('#ann-url').value=st.dashboardUrl||window.location.origin;
 
-async function refreshAll() {
-  try {
-    const st = await api('/api/admin/status');
-    $('#st-tag').textContent = st.tag || '—';
-    $('#st-online').textContent = st.online ? 'Online' : 'Offline';
-    $('#bot-badge').textContent = st.online ? 'Online' : 'Offline';
-    $('#bot-badge').classList.toggle('off', !st.online);
-    $('#st-guilds').textContent = st.guilds ?? '—';
-    $('#st-ping').textContent = (st.ping != null ? st.ping + 'ms' : '—');
-    $('#st-uptime').textContent = st.uptime || '—';
-    setSwitch($('#sw-automod'), st.protection?.automod !== false);
-    setSwitch($('#sw-antiraid'), st.protection?.antiraid !== false);
-    setSwitch($('#sw-antinuke'), st.protection?.antinuke !== false);
-    $('#sync-ch').value = st.syncChannelId || '';
-    $('#ai-ch').value = st.aiChannelId || '';
-    $('#log-ch').value = st.logChannelId || '';
-    $('#ann-url').value = st.dashboardUrl || window.location.origin;
+    const inv=st.topInvites||[];
+    $('#invite-list').innerHTML=inv.length?inv.map((r,i)=>`<div class="list-item"><strong>#${i+1}</strong> ${r.name} — <strong>${r.total}</strong></div>`).join(''):'No invite data yet.';
+    const msg=st.topMessages||[];
+    $('#msg-list').innerHTML=msg.length?msg.map((r,i)=>`<div class="list-item"><strong>#${i+1}</strong> ${r.name} — <strong>${r.count}</strong></div>`).join(''):'No message data yet.';
 
-    const inv = st.topInvites || [];
-    $('#invite-list').innerHTML = inv.length
-      ? inv.map((r, i) => `<div style="margin-bottom:6px"><strong>#${i+1}</strong> ${r.name} — <span style="color:var(--accent)">${r.total}</span></div>`).join('')
-      : 'No invite data yet.';
-    const msg = st.topMessages || [];
-    $('#msg-list').innerHTML = msg.length
-      ? msg.map((r, i) => `<div style="margin-bottom:6px"><strong>#${i+1}</strong> ${r.name} — <span style="color:var(--accent)">${r.count}</span></div>`).join('')
-      : 'No message data yet.';
-  } catch (e) {
-    if (/401|auth/i.test(e.message)) showLogin();
-    else toast(e.message);
-  }
+    const active=st.giveawaysActive||[];
+    $('#gw-list').innerHTML=active.length?active.map(g=>`<div class="list-item"><strong>${g.prize}</strong> <span class="chip">active</span><br/>Winners: ${g.winners} · Entries: ${g.entries} · Ends: ${g.endsRel||'—'}</div>`).join(''):'No active giveaways.';
+    const ended=st.giveawaysEnded||[];
+    $('#gw-ended').innerHTML=ended.length?ended.map(g=>`<div class="list-item"><strong>${g.prize}</strong> <span class="chip off">ended</span><br/>${g.winnerTags||'No winners'}</div>`).join(''):'None yet.';
+  }catch(e){if(/401|auth/i.test(e.message))showLogin();else toast(e.message)}
 }
-
-$('#save-prot').onclick = async () => {
-  try {
-    await api('/api/admin/protection', {
-      method: 'POST',
-      body: JSON.stringify({
-        automod: $('#sw-automod').dataset.on === '1',
-        antiraid: $('#sw-antiraid').dataset.on === '1',
-        antinuke: $('#sw-antinuke').dataset.on === '1'
-      })
-    });
-    toast('Protection saved');
-  } catch (e) { toast(e.message); }
-};
-$('#save-sync').onclick = async () => {
-  try {
-    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ syncChannelId: $('#sync-ch').value.trim() }) });
-    toast('Sync channel saved');
-  } catch (e) { toast(e.message); }
-};
-$('#save-ai').onclick = async () => {
-  try {
-    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ aiChannelId: $('#ai-ch').value.trim() }) });
-    toast('AI channel saved');
-  } catch (e) { toast(e.message); }
-};
-$('#save-log').onclick = async () => {
-  try {
-    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ logChannelId: $('#log-ch').value.trim() }) });
-    toast('Log channel saved');
-  } catch (e) { toast(e.message); }
-};
-$('#do-export').onclick = async () => {
-  try { await api('/api/admin/export', { method: 'POST', body: '{}' }); toast('Export sent'); }
-  catch (e) { toast(e.message); }
-};
-$('#do-import').onclick = async () => {
-  try { const r = await api('/api/admin/import', { method: 'POST', body: '{}' }); toast(r.ok ? 'Imported' : r.reason); }
-  catch (e) { toast(e.message); }
-};
-$('#do-announce').onclick = async () => {
-  try {
-    await api('/api/admin/announce', {
-      method: 'POST',
-      body: JSON.stringify({
-        channelId: $('#ann-ch').value.trim(),
-        dashboardUrl: $('#ann-url').value.trim(),
-        showPassword: $('#ann-show-pw').checked
-      })
-    });
-    toast('Message sent');
-  } catch (e) { toast(e.message); }
-};
-
-if (localStorage.getItem(tokenKey)) showApp();
+$('#save-prot').onclick=async()=>{try{await api('/api/admin/protection',{method:'POST',body:JSON.stringify({automod:$('#sw-automod').dataset.on==='1',antiraid:$('#sw-antiraid').dataset.on==='1',antinuke:$('#sw-antinuke').dataset.on==='1'})});toast('Protection saved')}catch(e){toast(e.message)}};
+$('#save-sync').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({syncChannelId:$('#sync-ch').value.trim()})});toast('Sync saved')}catch(e){toast(e.message)}};
+$('#save-ai').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({aiChannelId:$('#ai-ch').value.trim()})});toast('AI channel saved')}catch(e){toast(e.message)}};
+$('#save-log').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({logChannelId:$('#log-ch').value.trim()})});toast('Log saved')}catch(e){toast(e.message)}};
+$('#do-export').onclick=async()=>{try{await api('/api/admin/export',{method:'POST',body:'{}'});toast('Export sent')}catch(e){toast(e.message)}};
+$('#do-import').onclick=async()=>{try{const r=await api('/api/admin/import',{method:'POST',body:'{}'});toast(r.ok?'Imported':r.reason)}catch(e){toast(e.message)}};
+$('#do-announce').onclick=async()=>{try{await api('/api/admin/announce',{method:'POST',body:JSON.stringify({channelId:$('#ann-ch').value.trim(),dashboardUrl:$('#ann-url').value.trim(),showPassword:$('#ann-show-pw').checked})});toast('Message sent')}catch(e){toast(e.message)}};
+if(localStorage.getItem(tokenKey))showApp();
 </script>
 </body>
 </html>
