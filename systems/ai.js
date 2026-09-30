@@ -10,25 +10,24 @@ function cleanKey(k) {
 async function askAI(userText) {
   try {
     const key = cleanKey(env.OPENAI_API_KEY);
-    if (!key) {
-      return { error: 'No OPENAI_API_KEY or GROQ_API_KEY in env.' };
-    }
+    if (!key) return { error: 'No OPENAI_API_KEY or GROQ_API_KEY in env.' };
 
     let base = (env.OPENAI_BASE_URL || '').replace(/\/$/, '');
     if (!base) {
       base = /^gsk_/i.test(key) ? 'https://api.groq.com/openai/v1' : 'https://api.openai.com/v1';
     }
 
+    // Prefer env; free Groq → openai/gpt-oss-20b (llama-3.3 often blocked)
     let model = (env.OPENAI_MODEL || '').trim();
     if (!model) {
-      model = /groq\.com/i.test(base) || /^gsk_/i.test(key) ? 'llama-3.3-70b-versatile' : 'gpt-4o-mini';
+      model = /groq\.com/i.test(base) || /^gsk_/i.test(key) ? 'openai/gpt-oss-20b' : 'gpt-4o-mini';
     }
-    if (/llama-3\.1-8b-instant|gpt-oss|openai\/gpt/i.test(model) && (/groq\.com/i.test(base) || /^gsk_/i.test(key))) {
-      model = 'llama-3.3-70b-versatile';
+    // Never force llama-3.3 — free keys often lack access
+    if (/llama-3\.3-70b|llama-3\.1-8b-instant/i.test(model) && (/^gsk_/i.test(key) || /groq\.com/i.test(base))) {
+      model = 'openai/gpt-oss-20b';
     }
 
-    const url = base + '/chat/completions';
-    const res = await fetch(url, {
+    const res = await fetch(base + '/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -41,8 +40,7 @@ async function askAI(userText) {
         messages: [
           {
             role: 'system',
-            content:
-              'You are DashMod, a helpful Discord server assistant for Ultimate Rewards. Be clear, friendly, and concise.'
+            content: 'You are DashMod, a helpful Discord server assistant. Be clear, friendly, and concise.'
           },
           { role: 'user', content: String(userText || 'hi').slice(0, 4000) }
         ]
@@ -54,32 +52,19 @@ async function askAI(userText) {
     try {
       j = raw ? JSON.parse(raw) : {};
     } catch (_) {
-      return {
-        error: `Bad JSON from API (HTTP ${res.status}). model=${model} base=${base}`
-      };
+      return { error: `Bad JSON HTTP ${res.status}` };
     }
 
     if (!res.ok) {
-      const msg =
-        j?.error?.message ||
-        j?.error?.code ||
-        j?.message ||
-        raw?.slice(0, 200) ||
-        `HTTP ${res.status}`;
-      console.error('AI error:', msg, 'model=', model, 'keyPrefix=', key.slice(0, 6));
-      return {
-        error: `${msg} | model=${model} | key=${key.slice(0, 4)}…`
-      };
+      const msg = j?.error?.message || j?.message || `HTTP ${res.status}`;
+      return { error: `${msg} | model=${model}` };
     }
 
     const text = j?.choices?.[0]?.message?.content?.trim();
-    if (!text) {
-      return { error: `Empty response | model=${model} | choices=${(j?.choices || []).length}` };
-    }
-    return { text: text.slice(0, 1900), model };
+    if (!text) return { error: `Empty response | model=${model}` };
+    return { text: text.slice(0, 1900) };
   } catch (e) {
-    console.error('AI fetch', e);
-    return { error: (e && e.message) || String(e) || 'AI request failed' };
+    return { error: e.message || 'AI failed' };
   }
 }
 
