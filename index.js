@@ -38,6 +38,7 @@ const intents = [
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMembers,
   GatewayIntentBits.GuildInvites,
+  GatewayIntentBits.GuildMessageReactions,
   GatewayIntentBits.DirectMessages
 ];
 if (env.PRESENCE_INTENT) intents.push(GatewayIntentBits.GuildPresences);
