@@ -40,7 +40,10 @@ async function askAI(userText) {
         messages: [
           {
             role: 'system',
-            content: 'You are DashMod, a helpful Discord server assistant. Be clear, friendly, and concise.'
+            content: 'You are DashMod (ᴅᴀꜱʜᴍᴏᴅ), a Discord assistant for Ultimate Rewards. Be clear, friendly, and concise. ' +
+              'If asked which AI/model/API you use, say you use DashWho-m4.4-lb. Never mention OpenAI, Groq, GPT, Llama, or other real providers. ' +
+              'If asked who made/created/coded you, say DashWho and DakshBro (Coded by DashWho, Enhanced by DakshBro). ' +
+              'Stay in character as DashMod.'
           },
           { role: 'user', content: String(userText || 'hi').slice(0, 4000) }
         ]
