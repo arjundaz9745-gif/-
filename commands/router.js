@@ -287,24 +287,38 @@ async function handleCommand(message, client) {
     if (!needStaff()) return true;
     const timeRaw = args[0];
     const winners = parseInt(args[1], 10) || 1;
-    const prize = args.slice(2).join(' ');
-    if (!timeRaw || !prize) return message.reply('`' + P + 'gstart 1h 1 Nitro`');
+    // prize = rest, optional last arg or attachment = image
+    let rest = args.slice(2);
+    let image = null;
+    if (message.attachments.size) {
+      const img = message.attachments.find((a) => /\.(png|jpe?g|gif|webp)$/i.test(a.name || '') || (a.contentType || '').startsWith('image/'));
+      if (img) image = img.url;
+    }
+    if (rest.length && /^https?:\/\//i.test(rest[rest.length - 1])) {
+      image = rest.pop();
+    }
+    const prize = rest.join(' ');
+    if (!timeRaw || !prize) {
+      return message.reply('`' + P + 'gstart 1h 1 Nitro`\nOptional image: attach a picture or put image URL at the end\n`' + P + 'gstart 1h 1 Nitro https://i.imgur.com/xxx.png`');
+    }
     const ms = parseDuration(timeRaw);
-    if (!ms || ms < 10000) return message.reply('Bad time');
+    if (!ms || ms < 10000) return message.reply('Bad time (e.g. 10m, 1h, 1d)');
+    const ends = Date.now() + ms;
     const g = {
-      channelId: message.channel.id,
       prize,
-      winners,
-      ends: Date.now() + ms,
+      winners: Math.min(Math.max(winners, 1), 20),
+      ends,
       hostId: message.author.id,
+      channelId: message.channel.id,
       entries: [],
-      ended: false
+      ended: false,
+      image: image || null
     };
     const msg = await message.channel.send({ embeds: [giveawayEmbed(g)], components: [giveawayRow()] });
     if (!data.giveaways) data.giveaways = {};
     data.giveaways[msg.id] = g;
     dataStore.save();
-    setTimeout(() => endGiveaway(client, msg.id), ms + 500);
+    await message.reply({ embeds: [E('Giveaway', 'Started' + (image ? ' · with image' : ''), brand.green)] });
     return true;
   }
   if (cmd === 'gend') {
@@ -512,7 +526,8 @@ async function handleCommand(message, client) {
     if (sub === 'help' || sub === '') {
       await message.reply({
         embeds: [E('Reaction roles', [
-          '`' + P + 'rr panel` — post a roles panel (then add emojis)',
+          '`' + P + 'rr setup 🎉 @Events 📢 @Announce` — post react-to-get-role message',
+          '`' + P + 'rr panel` — empty panel,',
           '`' + P + 'rr add <messageId> <emoji> @role` — bind emoji → role',
           '`' + P + 'rr remove <messageId> <emoji>` — unbind',
           '`' + P + 'rr list <messageId>` — list bindings',
@@ -528,9 +543,71 @@ async function handleCommand(message, client) {
 
     if (sub === 'panel') {
       const title = args.slice(1).join(' ') || 'Self roles';
-      const emb = E(title, 'React below to get roles.\nStaff: use `' + P + 'rr add <msgId> <emoji> @role` on this message.');
+      const emb = E(title, 'React below to get roles.\nStaff: use `' + P + 'rr setup` or `' + P + 'rr add <msgId> <emoji> @role`.');
       const panel = await message.channel.send({ embeds: [emb] });
-      await message.reply({ embeds: [E('Panel', 'Message ID: `' + panel.id + '`\nUse: `' + P + 'rr add ' + panel.id + ' 🎉 @Role`', brand.green)] });
+      await message.reply({ embeds: [E('Panel', 'Message ID: `' + panel.id + '`', brand.green)] });
+      return true;
+    }
+
+    // -rr setup 🎉 @Role1 📢 @Role2
+    if (sub === 'setup' || sub === 'create') {
+      const rest = message.content.slice(message.content.toLowerCase().indexOf(sub) + sub.length).trim();
+      if (!rest || !message.mentions.roles.size) {
+        await message.reply(
+          '`' + P + 'rr setup 🎉 @Events Ping 📢 @Announcements`\n' +
+            'Order: emoji then @role, repeat for each role.'
+        );
+        return true;
+      }
+      // Parse tokens: emoji, role mention pairs
+      const tokens = rest.split(/\s+/).filter(Boolean);
+      const pairs = [];
+      let i = 0;
+      while (i < tokens.length) {
+        const tok = tokens[i];
+        if (/^<@&(\d+)>$/.test(tok)) {
+          i++;
+          continue;
+        }
+        // emoji token (unicode or custom)
+        const emojiTok = tok;
+        // find next role mention after this emoji
+        let roleId = null;
+        let j = i + 1;
+        while (j < tokens.length) {
+          const mRole = tokens[j].match(/^<@&(\d+)>$/);
+          if (mRole) {
+            roleId = mRole[1];
+            i = j + 1;
+            break;
+          }
+          j++;
+        }
+        if (!roleId) {
+          i++;
+          continue;
+        }
+        const role = message.guild.roles.cache.get(roleId);
+        if (!role) continue;
+        pairs.push({ emoji: emojiTok, role });
+      }
+      if (!pairs.length) {
+        await message.reply('Could not parse pairs. Example: `' + P + 'rr setup 🎉 @Events 🔔 @Ping`');
+        return true;
+      }
+      const lines = pairs.map((p) => `React with ${p.emoji} to get **${p.role.name}**`);
+      const emb = E(
+        '📌 Self roles',
+        lines.join('\n') + '\n\n*Click a reaction below to get or remove the role.*'
+      );
+      const panel = await message.channel.send({ embeds: [emb] });
+      for (const p of pairs) {
+        addMapping(message.guild.id, panel.id, p.emoji, p.role.id);
+        await panel.react(p.emoji).catch(() => {});
+      }
+      await message.reply({
+        embeds: [E('Reaction roles', 'Posted **' + pairs.length + '** roles on `' + panel.id + '`', brand.green)]
+      });
       return true;
     }
 
@@ -728,7 +805,41 @@ async function handleCommand(message, client) {
     return true;
   }
 
+  if (cmd === 'respect') {
+    if (!needStaff()) return true;
+    const user = message.mentions.users.first();
+    if (!user) return message.reply('`' + P + 'respect @user` + attach sticker/gif or paste gif URL');
+    if (!data.respect) data.respect = {};
+    let entry = null;
+    if (message.stickers?.size) {
+      const st = message.stickers.first();
+      entry = { type: 'sticker', id: st.id, url: st.url || null };
+    } else if (message.attachments.size) {
+      const a = message.attachments.first();
+      entry = { type: 'gif', url: a.url };
+    } else {
+      const url = args.find((a) => /^https?:\/\//i.test(a));
+      if (url) entry = { type: 'gif', url };
+    }
+    if (!entry) return message.reply('Attach a sticker/gif or paste a gif URL.');
+    data.respect[user.id] = entry;
+    dataStore.save();
+    await message.reply({ embeds: [E('Respect', `When someone pings **${user.username}**, the bot sends that media.`, brand.green)] });
+    return true;
+  }
+
+  if (cmd === 'game' || cmd === 'tictactoe' || cmd === 'ttt') {
+    const user = message.mentions.users.first();
+    if (!user || user.bot || user.id === message.author.id) {
+      return message.reply('`' + P + 'game @user` — Tic Tac Toe challenge');
+    }
+    const ttt = require('../systems/tictactoe');
+    await ttt.startGame(message.channel, message.author, user);
+    return true;
+  }
+
   return false;
 }
 
 module.exports = { handleCommand };
+
