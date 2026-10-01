@@ -24,6 +24,7 @@ const { handleCommand } = require('./commands/router');
 const { startWebServer } = require('./web/server');
 const { registerAntiNuke } = require('./systems/antinuke');
 const { registerReactionRoles } = require('./systems/reactionRoles');
+const ttt = require('./systems/tictactoe');
 
 if (!env.TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -75,7 +76,8 @@ async function onReady() {
         .addStringOption((o) => o.setName('duration').setRequired(true))
         .addStringOption((o) => o.setName('reason')),
       new SlashCommandBuilder().setName('ping').setDescription('Latency'),
-      new SlashCommandBuilder().setName('avatar').setDescription('Avatar').addUserOption((o) => o.setName('user'))
+      new SlashCommandBuilder().setName('avatar').setDescription('Avatar').addUserOption((o) => o.setName('user')),
+      new SlashCommandBuilder().setName('game').setDescription('Tic Tac Toe').addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true))
     ].map((c) => c.toJSON());
     const rest = new REST({ version: '10' }).setToken(env.TOKEN);
     if (env.GUILD_ID) await rest.put(Routes.applicationGuildCommands(client.user.id, env.GUILD_ID), { body: cmds });
@@ -225,7 +227,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
     await message.channel.sendTyping().catch(() => {});
-    const reply = await askAI(message.content);
+    const reply = await askAI(message.content, message.channel.id, message.author.id);
     if (reply && reply.text) {
       await message.reply({ content: reply.text, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
@@ -242,6 +244,10 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('ttt:')) {
+      await ttt.handleButton(interaction);
+      return;
+    }
     if (interaction.isButton() && interaction.customId === 'gw_enter') {
       const data = dataStore.get();
       const g = data.giveaways?.[interaction.message.id];
@@ -340,6 +346,13 @@ client.on('interactionCreate', async (interaction) => {
       return reply({ embeds: [E('Timeout', user.tag, brand.green)], ephemeral: true });
     }
     if (name === 'ping') return reply({ embeds: [E('Ping', `WS **${Math.round(client.ws.ping)}ms**`)], ephemeral: true });
+    if (name === 'game') {
+      const opp = interaction.options.getUser('user');
+      if (!opp || opp.bot || opp.id === interaction.user.id) return reply('Pick a real opponent.');
+      await interaction.deferReply();
+      await ttt.startGame(interaction.channel, interaction.user, opp);
+      return interaction.editReply('Challenge sent!');
+    }
     if (name === 'avatar') {
       const u = interaction.options.getUser('user') || interaction.user;
       return reply({ embeds: [E(u.username).setImage(u.displayAvatarURL({ size: 512 }))] });
