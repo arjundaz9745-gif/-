@@ -90,23 +90,23 @@ function isPurchaseChannel(name) {
 }
 
 // ── Ticket Panel ──
-async function sendTicketPanel(channel, imageUrl) {
+async function sendTicketPanel(channel, imageUrl, customDesc) {
+  const defaultDesc = [
+    'Select a category below to open a private ticket.',
+    '',
+    '**Categories**',
+    '• **Support** — general help',
+    '• **Claim** — claim a free / giveaway reward',
+    '• **Purchase Paid** — you already paid (staff will give redeem code)',
+    '• **Help** — account / delivery questions',
+    '',
+    'Staff will respond as soon as possible.'
+  ].join('\n');
+
   const embed = new EmbedBuilder()
     .setColor(0x1abc9c)
     .setTitle('🎫 Ultimate Rewards · Support Tickets')
-    .setDescription(
-      [
-        'Select a category below to open a private ticket.',
-        '',
-        '**Categories**',
-        '• **Support** — general help',
-        '• **Claim** — claim a free / giveaway reward',
-        '• **Purchase Paid** — you already paid (staff will give redeem code)',
-        '• **Help** — account / delivery questions',
-        '',
-        'Staff will respond as soon as possible.'
-      ].join('\n')
-    )
+    .setDescription(customDesc || defaultDesc)
     .setFooter({ text: 'Ultimate Rewards Ticket System' });
 
   if (imageUrl) embed.setImage(imageUrl);
@@ -353,10 +353,31 @@ function registerTicketSystem(client) {
   });
 }
 
-// Prefix command helper: -ticketpanel [image url]
+// Prefix command helper:
+// -ticketpanel
+// -ticketpanel https://image.url
+// -ticketpanel (with image attached)
+// -ticketpanel optional description text (with or without image)
 async function handleTicketPanelCommand(message, args) {
-  const image = args[0] && args[0].startsWith('http') ? args[0] : null;
-  await sendTicketPanel(message.channel, image);
+  // 1) Image from attachment (Discord upload)
+  let image = null;
+  if (message.attachments && message.attachments.size > 0) {
+    const att = message.attachments.find(a => a.contentType && a.contentType.startsWith('image/'))
+             || message.attachments.first();
+    if (att) image = att.url;
+  }
+
+  // 2) Image from URL argument
+  if (!image) {
+    const urlArg = args.find(a => a.startsWith('http'));
+    if (urlArg) image = urlArg;
+  }
+
+  // Optional description (everything that is not a URL)
+  const descParts = args.filter(a => !a.startsWith('http'));
+  const customDesc = descParts.length ? descParts.join(' ') : null;
+
+  await sendTicketPanel(message.channel, image, customDesc);
   await message.reply({ content: 'Ticket panel posted.' }).then(m => setTimeout(() => m.delete().catch(() => {}), 3000));
 }
 
