@@ -31,6 +31,7 @@ const PURCHASE_NOTIFY_CHANNEL = process.env.PURCHASE_NOTIFY_CHANNEL || '15536178
 const PRIORITY_USER_ID = process.env.PRIORITY_USER_ID || '1080190046138802306';
 const PRIORITY_ROLE_ID = process.env.PRIORITY_ROLE_ID || '1547183159794204675'; // OWNER role from your roles.js
 const REDEEM_BASE_URL = process.env.REDEEM_BASE_URL || process.env.ULTIMATE_WEB || 'https://ultimate-rewards.onrender.com';
+const REDEEM_SECRET = process.env.REDEEM_SECRET || 'ultimate-redeem-secret-change-me';
 const REDEEM_CODES_FILE = path.join(__dirname, '..', 'data', 'redeem-codes.json');
 
 // Ensure data dir
@@ -47,16 +48,52 @@ function saveCodes(data) {
   fs.writeFileSync(REDEEM_CODES_FILE, JSON.stringify(data, null, 2));
 }
 
-function random15() {
+// Format like: ZH26637FDHHS5638 (16 chars, A-Z + 0-9)
+function randomCode(len = 16) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid confusion
   let s = '';
-  for (let i = 0; i < 15; i++) s += Math.floor(Math.random() * 10);
+  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
 
-function makeCode(staffId, channelId) {
+/** Register code on the website so redeem works across separate Render services */
+async function registerCodeOnWebsite(code, staffId, channelId) {
+  const base = (REDEEM_BASE_URL || '').replace(/\/$/, '');
+  if (!base) {
+    console.warn('[tickets] REDEEM_BASE_URL not set — website will not know this code');
+    return false;
+  }
+  try {
+    const res = await fetch(base + '/api/redeem/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-redeem-secret': REDEEM_SECRET
+      },
+      body: JSON.stringify({
+        code,
+        createdBy: staffId,
+        channelId,
+        secret: REDEEM_SECRET
+      })
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      console.error('[tickets] register code failed', res.status, t);
+      return false;
+    }
+    console.log('[tickets] code registered on website', code);
+    return true;
+  } catch (e) {
+    console.error('[tickets] register code error', e.message);
+    return false;
+  }
+}
+
+async function makeCode(staffId, channelId) {
   const data = loadCodes();
   let code;
-  do { code = random15(); } while (data.codes[code]);
+  do { code = randomCode(16); } while (data.codes[code]);
   data.codes[code] = {
     code,
     createdBy: staffId,
@@ -68,6 +105,8 @@ function makeCode(staffId, channelId) {
     type: null
   };
   saveCodes(data);
+  // Push to website (required — bot & site don't share disk)
+  await registerCodeOnWebsite(code, staffId, channelId);
   return code;
 }
 
@@ -330,7 +369,7 @@ function registerTicketSystem(client) {
       }
     } catch {}
 
-    const code = makeCode(message.author.id, message.channel.id);
+    const code = await makeCode(message.author.id, message.channel.id);
     const embed = new EmbedBuilder()
       .setColor(0x1abc9c)
       .setTitle('🔑 One-time Redeem Code Generated')
@@ -342,6 +381,7 @@ function registerTicketSystem(client) {
           '',
           '• Valid **only** on our website',
           '• **One-time** use only',
+          '• Code looks like: `ZH26637FDHHS5638`',
           '• Customer selects: NFA · MCFA · Netflix · Spotify · Crunchyroll · Minecraft',
           '• Then enters this code → ticket is created & Discord ticket can be closed'
         ].join('\n')
