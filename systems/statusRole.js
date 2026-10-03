@@ -3,7 +3,6 @@
  */
 const { ActivityType } = require('discord.js');
 const dataStore = require('../utils/data');
-const env = require('../config/env');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 
@@ -14,6 +13,7 @@ function getCfg() {
     freeRoleId: d.genConfig.freeRoleId || process.env.FREE_GEN_ROLE_ID || '1555784683290370058',
     premiumRoleId: d.genConfig.premiumRoleId || process.env.PREMIUM_GEN_ROLE_ID || '1555784773748654153',
     boosterRoleId: d.genConfig.boosterRoleId || process.env.BOOSTER_GEN_ROLE_ID || '',
+    restockUserId: d.genConfig.restockUserId || process.env.RESTOCK_USER_ID || '1541659394188509215',
     freeStatusText: d.genConfig.freeStatusText || process.env.FREE_STATUS_TEXT || 'Free g3n at discord.gg/PKtNdEAGC',
     statusInvite: d.genConfig.statusInvite || 'discord.gg/PKtNdEAGC'
   };
@@ -35,7 +35,7 @@ function hasRequiredStatus(member) {
   const text = memberStatusText(member);
   const needle = (cfg.freeStatusText || '').toLowerCase();
   const inv = (cfg.statusInvite || '').toLowerCase();
-  if (needle && text.includes(needle.toLowerCase())) return true;
+  if (needle && text.includes(needle)) return true;
   if (inv && text.includes(inv)) return true;
   if (text.includes('free g3n') && text.includes('discord.gg')) return true;
   return false;
