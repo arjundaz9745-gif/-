@@ -24,5 +24,8 @@ module.exports = {
   OPENAI_API_KEY: String(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY || '').trim().replace(/^["']|["']$/g, ''),
   OPENAI_BASE_URL: (process.env.OPENAI_BASE_URL || '').replace(/\/$/, ''),
   OPENAI_MODEL: process.env.OPENAI_MODEL || '',
-  PRESENCE_INTENT: process.env.PRESENCE_INTENT !== 'false'
+  PRESENCE_INTENT: process.env.PRESENCE_INTENT !== '0' && process.env.PRESENCE_INTENT !== 'false',
+  WEBSITE_URL: (process.env.WEBSITE_URL || '').replace(/\/$/, ''),
+  REDEEM_SECRET: process.env.REDEEM_SECRET || 'ultimate-redeem-secret-change-me',
+  PURCHASE_NOTIFY_CHANNEL_ID: process.env.PURCHASE_NOTIFY_CHANNEL_ID || '1553617840651771974'
 };
