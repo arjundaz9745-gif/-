@@ -18,6 +18,8 @@ const { addMessageCount, ensureInviteStats, buildInviteEmbed } = require('./syst
 const { trackWindow, spamTracker, joinTracker, getProtection, logProtect } = require('./systems/protection');
 const { handleMentions } = require('./systems/pingProtect');
 const { askAI } = require('./systems/ai');
+const { handleIAmHere } = require('./systems/redeem');
+const { handleGenMessage } = require('./systems/genCommands');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { handleCommand } = require('./commands/router');
@@ -220,6 +222,8 @@ client.on('messageCreate', async (message) => {
   } catch (_) {}
 
   await handleMentions(message).catch((e) => console.error('ping', e.message));
+  if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
+  if (await handleIAmHere(message).catch(() => false)) return;
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
   if (aiCh && message.channel.id === aiCh && !message.content.startsWith(brand.PREFIX)) {
