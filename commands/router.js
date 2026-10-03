@@ -11,6 +11,8 @@ const { buildInviteEmbed, ensureInviteStats, inviteBreakdown } = require('../sys
 const { exportToChannel, importFromChannel, scheduleExport } = require('../systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('../systems/giveaways');
 const { addMapping, removeMapping, listForMessage } = require('../systems/reactionRoles');
+const { formatStockList, formatMethodList, STOCK_META, METHOD_META } = require('../systems/stocks');
+const { botLog } = require('../systems/logger');
 
 async function handleCommand(message, client) {
   if (!message.content.startsWith(brand.PREFIX)) return false;
@@ -717,27 +719,92 @@ async function handleCommand(message, client) {
     await message.reply('add | list');
     return true;
   }
+  if (cmd === 'logs' || cmd === 'setlogs' || cmd === 'logchannel') {
+    if (!needStaff()) return true;
+    const ch = message.mentions.channels.first();
+    if (!ch) {
+      const cur = data.settings?.logChannelId || env.LOG_CHANNEL_ID || 'not set';
+      await message.reply({ embeds: [E('Logs', 'Current: `' + cur + '`\nSet: `' + P + 'logs #channel`\nClear: `' + P + 'logs off`')] });
+      return true;
+    }
+    if ((args[0] || '').toLowerCase() === 'off') {
+      data.settings = data.settings || {};
+      data.settings.logChannelId = null;
+      dataStore.save();
+      await message.reply({ embeds: [E('Logs', 'Disabled — nothing will be sent.', brand.gold)] });
+      return true;
+    }
+    data.settings = data.settings || {};
+    data.settings.logChannelId = ch.id;
+    dataStore.save();
+    await message.reply({ embeds: [E('Logs', 'Log channel → ' + String(ch), brand.green)] });
+    await botLog(client, message.guild, 'Logs enabled', 'Channel set to ' + String(ch), brand.green);
+    return true;
+  }
+
   if (cmd === 'stock') {
-    const keys = Object.keys(data.stocks || {});
-    if (!keys.length) return message.reply({ embeds: [E('Stock', 'Empty')] });
-    await message.reply({
-      embeds: [E('Stock', keys.map((k) => `**${k}** · ${(data.stocks[k] || []).length}`).join('\n'))]
-    });
+    await message.reply({ embeds: [E('📦 Stocks', formatStockList(data))] });
     return true;
   }
   if (cmd === 'stockadd') {
     if (!needStaff()) return true;
     const name = (args[0] || '').toLowerCase();
     const line = args.slice(1).join(' ');
-    if (!name || !line) return message.reply('`' + P + 'stockadd name item`');
+    if (!name || !line) {
+      const keys = Object.keys(STOCK_META).join(', ');
+      return message.reply('`' + P + 'stockadd <key> <item>`\nKeys: ' + keys);
+    }
     if (!data.stocks) data.stocks = {};
     if (!data.stocks[name]) data.stocks[name] = [];
     data.stocks[name].push(line);
     dataStore.save();
     scheduleExport(client, 'stock');
-    await message.reply({ embeds: [E('Stock', `**${name}** · ${data.stocks[name].length}`, brand.green)] });
+    const meta = STOCK_META[name];
+    const label = meta ? meta.emoji + ' ' + meta.label : name;
+    await message.reply({ embeds: [E('Stock', `**${label}** · **${data.stocks[name].length}** in stock`, brand.green)] });
+    await botLog(client, message.guild, 'Stock add', `**${name}** by ${message.author.tag}`, brand.blurple);
     return true;
   }
+  if (cmd === 'stocktake' || cmd === 'stockget') {
+    if (!needStaff()) return true;
+    const name = (args[0] || '').toLowerCase();
+    if (!name || !(data.stocks?.[name] || []).length) {
+      return message.reply('`' + P + 'stocktake <key>` — empty or unknown');
+    }
+    const item = data.stocks[name].shift();
+    dataStore.save();
+    scheduleExport(client, 'stock');
+    await message.reply({ embeds: [E('Stock out', `**${name}**\n||${item}||\nLeft: **${data.stocks[name].length}**`, brand.green)] });
+    return true;
+  }
+  if (cmd === 'methods' || cmd === 'method') {
+    const sub = (args[0] || 'list').toLowerCase();
+    if (sub === 'list' || sub === '') {
+      await message.reply({ embeds: [E('📜 Methods', formatMethodList(data))] });
+      return true;
+    }
+    if (sub === 'set') {
+      if (!needStaff()) return true;
+      const key = (args[1] || '').toLowerCase();
+      const text = args.slice(2).join(' ');
+      if (!key || !text) return message.reply('`' + P + 'method set <key> <text…>`');
+      if (!data.methods) data.methods = {};
+      data.methods[key] = text;
+      dataStore.save();
+      await message.reply({ embeds: [E('Method', `Saved **${key}**`, brand.green)] });
+      return true;
+    }
+    if (sub === 'get' || METHOD_META[sub] || (data.methods && data.methods[sub])) {
+      const key = sub === 'get' ? (args[1] || '').toLowerCase() : sub;
+      const text = data.methods?.[key];
+      if (!text) return message.reply('No method text for `' + key + '`');
+      await message.reply({ embeds: [E('Method · ' + key, text)] });
+      return true;
+    }
+    await message.reply('`' + P + 'methods` · `' + P + 'method set key text` · `' + P + 'method get key`');
+    return true;
+  }
+
     if (cmd === 'dashboard' || cmd === 'panel') {
     const ownerIds = [ROLE.OWNER, ROLE.CO_OWNER, ROLE.FOUNDER].filter(Boolean);
     const isOwner =
