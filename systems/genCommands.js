@@ -121,12 +121,29 @@ async function handleGenMessage(message, client) {
       if (!staffOk(message.member)) return true;
       const pool = cmd;
       const key = (args[1] || '').toLowerCase();
-      const line = args.slice(2).join(' ');
-      if (!key || !line) {
-        await message.reply('`' + prefix + cmd + ' add <item> email:pass`');
+      const rest = args.slice(2);
+      if (!key || !rest.length) {
+        await message.reply(
+          '`' + prefix + cmd + ' add <item> email:pass`\n' +
+            'Multiple: `' + prefix + cmd + ' add mcfa a@x.com:pass1 b@y.com:pass2`'
+        );
         return true;
       }
-      const lines = line.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      // Space-separated email:pass pairs (and any token containing :)
+      let lines = rest.map((s) => s.trim()).filter((s) => s.includes(':'));
+      // Also parse from raw content after "add <key>"
+      try {
+        const idx = message.content.toLowerCase().indexOf('add');
+        const tail = idx >= 0 ? message.content.slice(idx + 3).trim() : '';
+        const afterKey = tail.replace(new RegExp('^' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+', 'i'), '');
+        const fromRaw = afterKey.split(/[\s\n]+/).map((s) => s.trim()).filter((s) => s.includes(':'));
+        if (fromRaw.length > lines.length) lines = fromRaw;
+      } catch (_) {}
+      lines = [...new Set(lines.filter(Boolean))];
+      if (!lines.length) {
+        await message.reply('No email:pass found. Example: `' + prefix + cmd + ' add mcfa mail1:pass1 mail2:pass2`');
+        return true;
+      }
       let n = 0;
       for (const L of lines) {
         const r = addStock(pool, key, L);
@@ -222,21 +239,26 @@ async function handleGenMessage(message, client) {
   // Product: -mcfa add
   if (PRODUCT_KEYS[cmd] && (args[0] || '').toLowerCase() === 'add') {
     if (!staffOk(message.member)) return true;
-    const line = args.slice(1).join(' ');
-    if (!line) {
-      await message.reply('`' + prefix + cmd + ' add email:pass`');
+    const rest = args.slice(1);
+    let lines = rest.map((s) => s.trim()).filter((s) => s.includes(':'));
+    if (!lines.length) {
+      await message.reply('`' + prefix + cmd + ' add email:pass` — multiple: `' + prefix + cmd + ' add a:b c:d e:f`');
       return true;
     }
-    const r = addStock('stocks', cmd, line);
-    if (!r.ok) {
-      await message.reply(r.reason || 'Failed');
-      return true;
+    let n = 0;
+    let last = 0;
+    for (const L of lines) {
+      const r = addStock('stocks', cmd, L);
+      if (r.ok) {
+        n++;
+        last = r.count;
+      }
     }
     await message.reply({
       embeds: [
         E(
           resolveEmoji(message.guild, cmd) + ' ' + PRODUCT_KEYS[cmd].label,
-          'Added · total **' + r.count + '**',
+          'Added **' + n + '** · total **' + last + '**',
           brand.green
         )
       ]
