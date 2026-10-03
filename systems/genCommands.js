@@ -103,19 +103,27 @@ async function handleGenMessage(message, client) {
     const key = (args[0] || '').toLowerCase();
     if (!key) {
       await message.reply({
-        embeds: [E(cmd.toUpperCase(), listPool(message.guild, pool) + `\n\nUsage: \`${prefix}${cmd} <item>\``)]
+        embeds: [E(cmd.toUpperCase(), listPool(message.guild, pool) + '\n\nUsage: `' + prefix + cmd + ' <item>`')]
       });
       return true;
     }
 
     const cfg = getCfg();
+    const vouchLine = 'Legit got ' + key + ' from <@1541659394188509215>';
+    const dmBody =
+      '||' +
+      itemPlaceholder +
+      '||\n\n---\n**Vouch required**\nIn <#1553617835635380278> post:\n`' +
+      vouchLine +
+      '`';
+
     if (pool === 'fgen') {
       if (cfg.freeRoleId && !message.member.roles.cache.has(cfg.freeRoleId)) {
         await message.reply({
           embeds: [
             E(
               'Free gen',
-              `You need the **Free gen** role.\nSet status + \`&cstatus\` or see \`${P}free\`.`,
+              'You need the **Free gen** role.\nSet status + `&cstatus` or see `' + P + 'free`.',
               brand.red
             )
           ]
@@ -125,19 +133,29 @@ async function handleGenMessage(message, client) {
       const item = takeStock('fgen', key);
       if (!item) {
         await message.reply({
-          content: `${message.author} free role stock is over. Please wait for <@${cfg.restockUserId}> for restocking. To enjoy unlimited stocks upgrade to **premium** tier.`,
+          content:
+            String(message.author) +
+            ' free role stock is over. Please wait for <@' +
+            cfg.restockUserId +
+            '> for restocking. To enjoy unlimited stocks upgrade to **premium** tier.',
           allowedMentions: { users: [message.author.id, cfg.restockUserId].filter(Boolean) }
         });
         return true;
       }
+      const body =
+        '||' +
+        item +
+        '||\n\n---\n**Vouch required**\nIn <#1553617835635380278> post:\n`' +
+        vouchLine +
+        '`';
       try {
         await message.author.send({
-          embeds: [E(`${resolveEmoji(message.guild, key)} Free gen · ${key}`, `||${item}||\nLeft in pool may be limited.`, brand.green)]
+          embeds: [E(resolveEmoji(message.guild, key) + ' Free gen · ' + key, body, brand.green)]
         });
-        await message.reply({ embeds: [E('Free gen', 'Sent to your DMs.', brand.green)] });
-      } catch {
+        await message.reply({ embeds: [E('Free gen', 'Sent to your DMs. Vouch in the vouch channel!', brand.green)] });
+      } catch (_) {
         await message.reply({ embeds: [E('Free gen', 'Open DMs to receive stock.', brand.red)] });
-        addStock('fgen', key, item); // put back
+        addStock('fgen', key, item);
       }
       return true;
     }
@@ -145,32 +163,37 @@ async function handleGenMessage(message, client) {
     // premium
     if (cfg.premiumRoleId && !message.member.roles.cache.has(cfg.premiumRoleId)) {
       await message.reply({
-        embeds: [E('Premium gen', `Premium role required. See \`${P}premium\`.`, brand.red)]
+        embeds: [E('Premium gen', 'Premium role required. See `' + P + 'premium`.', brand.red)]
       });
       return true;
     }
-    const item = takeStock('pgen', key);
-    if (!item) {
-      // "never over" messaging soft
+    const itemP = takeStock('pgen', key);
+    if (!itemP) {
       await message.reply({
         embeds: [
           E(
             'Premium gen',
-            `No **${key}** lines right now — staff restock soon. Premium queue is priority.`,
+            'No **' + key + '** lines right now — staff restock soon. Premium queue is priority.',
             brand.gold
           )
         ]
       });
       return true;
     }
+    const bodyP =
+      '||' +
+      itemP +
+      '||\n\n---\n**Vouch required**\nIn <#1553617835635380278> post:\n`' +
+      vouchLine +
+      '`';
     try {
       await message.author.send({
-        embeds: [E(`${resolveEmoji(message.guild, key)} Premium · ${key}`, `||${item}||`, brand.green)]
+        embeds: [E(resolveEmoji(message.guild, key) + ' Premium · ' + key, bodyP, brand.green)]
       });
-      await message.reply({ embeds: [E('Premium gen', 'Sent to your DMs.', brand.green)] });
-    } catch {
+      await message.reply({ embeds: [E('Premium gen', 'Sent to your DMs. Vouch in the vouch channel!', brand.green)] });
+    } catch (_) {
       await message.reply({ embeds: [E('Premium gen', 'Open DMs.', brand.red)] });
-      addStock('pgen', key, item);
+      addStock('pgen', key, itemP);
     }
     return true;
   }
