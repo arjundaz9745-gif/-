@@ -7,7 +7,7 @@ const DATA_PATH = (process.env.RENDER || process.env.PORT)
 
 function defaultData() {
   return {
-    inviteStats: {}, inviteUses: {}, invitedBy: {}, messages: {}, stocks: {},
+    inviteStats: {}, inviteUses: {}, invitedBy: {}, messages: {}, stocks: {}, methods: {},
     warnings: {}, giveaways: {}, afk: {}, snipes: {}, autorole: {}, autoreact: {},
     levels: {}, tickets: {},
     protection: {
