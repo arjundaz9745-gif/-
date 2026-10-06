@@ -24,6 +24,7 @@ const { handlePassMessage } = require('./systems/passChanger');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
+const runtimeLog = require('./systems/runtimeLog');
 const { handleCommand } = require('./commands/router');
 const { startWebServer } = require('./web/server');
 const { registerAntiNuke } = require('./systems/antinuke');
@@ -55,6 +56,7 @@ client.once('clientReady', onReady);
 client.once('ready', onReady);
 
 async function onReady() {
+  try { runtimeLog.markStart(); runtimeLog.info('Bot ready as ' + (client.user && client.user.tag)); } catch (_) {}
   console.log(`${brand.BOT_NAME} online as ${client.user.tag}`);
   try {
     const cmds = [
@@ -114,6 +116,7 @@ async function onReady() {
 }
 
 client.on('guildMemberAdd', async (member) => {
+  try { runtimeLog.info(`JOIN ${member.user.tag} → ${member.guild.name}`); } catch (_) {}
   const data = dataStore.get();
   try {
     if (data.autorole?.[member.guild.id]) await member.roles.add(data.autorole[member.guild.id]).catch(() => {});
@@ -155,6 +158,7 @@ client.on('guildMemberAdd', async (member) => {
 });
 
 client.on('guildMemberRemove', async (member) => {
+  try { runtimeLog.info(`LEAVE ${member.user?.tag || member.id} ← ${member.guild.name}`); } catch (_) {}
   try {
     const data = dataStore.get();
     const inviterId = data.invitedBy?.[member.guild.id]?.[member.id];
@@ -224,6 +228,11 @@ client.on('messageCreate', async (message) => {
   } catch (_) {}
 
   await handleMentions(message).catch((e) => console.error('ping', e.message));
+  if (!message.author.bot && message.guild) {
+    try {
+      runtimeLog.info(`MSG #${message.channel?.name || message.channelId} | ${message.author.tag}: ${String(message.content || '').slice(0, 120)}`);
+    } catch (_) {}
+  }
   const _d = dataStore.get();
   if (_d.botPaused && !message.member?.permissions?.has?.('Administrator')) {
     // bot stopped from panel — ignore non-admin
