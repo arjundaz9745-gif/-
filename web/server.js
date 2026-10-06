@@ -94,25 +94,14 @@ function startWebServer(client) {
       if (p === '/api/admin/login' && req.method === 'POST') {
         const body = await readBody(req);
         const pw = String(body.password || '');
-        const discordId = String(body.discordId || body.userId || '').trim();
         const panelPw = env.PANEL_PASSWORD || 'ultimaterewardspanel1';
-        const allowed = env.PANEL_ALLOWED_IDS || [];
-        // Accept panel password OR legacy admin password
-        const pwOk = pw === panelPw || pw === env.ADMIN_PASSWORD;
-        if (!pwOk) return json(res, 401, { error: 'Invalid password' });
-        if (!discordId || !allowed.includes(discordId)) {
-          return json(res, 403, { error: 'Discord ID not allowed on this panel' });
+        // Password only (panel-style). Accept panel password or legacy admin password.
+        if (pw !== panelPw && pw !== env.ADMIN_PASSWORD) {
+          return json(res, 401, { error: 'Invalid password' });
         }
-        const passOnly = discordId === (env.PASS_ONLY_ID || '1469378097412313216');
         const token = crypto.randomBytes(24).toString('hex');
-        adminSessions.set(token, { exp: Date.now() + 12 * 60 * 60 * 1000, discordId, passOnly });
-        return json(res, 200, {
-          token,
-          bot: brand.BOT_NAME,
-          discordId,
-          passOnly,
-          scopes: passOnly ? ['pass'] : ['full']
-        });
+        adminSessions.set(token, { exp: Date.now() + 12 * 60 * 60 * 1000, passOnly: false });
+        return json(res, 200, { token, bot: brand.BOT_NAME, scopes: ['full'] });
       }
 
       if (p.startsWith('/api/admin/')) {
