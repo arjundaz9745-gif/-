@@ -1,33 +1,38 @@
 /**
- * Product stocks with emoji keys + free/premium gen pools
+ * Gen stock pools — Freemium / Booster / Premium
  */
 const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 const env = require('../config/env');
 
-/** Canonical stock keys → custom emoji name (server emoji) or unicode */
+/** item key → emoji name on server + label + vault */
 const PRODUCT_KEYS = {
-  mcfa: { emoji: 'mcfa', label: 'MCFA', unicode: '⚔️' },
-  donut: { emoji: 'donut', label: 'Donut', unicode: '🍩' },
-  hypixel: { emoji: 'hypixel', label: 'Hypixel', unicode: '🎮' },
-  netflix: { emoji: 'netflix', label: 'Netflix', unicode: '📺' },
-  steam: { emoji: 'STEAM', label: 'Steam', unicode: '🕹️' },
-  xbox: { emoji: 'xbox', label: 'Xbox', unicode: '🎯' },
-  nitro: { emoji: 'Nitro', label: 'Nitro', unicode: '💎' },
-  hotmail: { emoji: 'hotmail', label: 'Hotmail', unicode: '📧' },
-  crunchyroll: { emoji: 'crunchyroll', label: 'Crunchyroll', unicode: '🍿' },
-  minecraft: { emoji: 'MINECRAFT', label: 'Minecraft', unicode: '⛏️' }
+  // Freemium
+  mcnfa: { emoji: 's_yellow', label: 'Mcnfa', unicode: '🟡', vault: 'fgen' },
+  xbox: { emoji: 's_yellow', label: 'Xbox', unicode: '🟡', vault: 'fgen' },
+  steam: { emoji: 's_yellow', label: 'Steam', unicode: '🟡', vault: 'fgen' },
+  crunchyroll: { emoji: 's_yellow', label: 'CrunchyRoll', unicode: '🟡', vault: 'fgen' },
+  xbox_code: { emoji: 's_yellow', label: 'Xbox Code', unicode: '🟡', vault: 'fgen' },
+  xboxcode: { emoji: 's_yellow', label: 'Xbox Code', unicode: '🟡', vault: 'fgen' },
+  netflix: { emoji: 's_yellow', label: 'Netflix', unicode: '🟡', vault: 'fgen' },
+  // Booster
+  mcsfa: { emoji: 'purple_1', label: 'Mcsfa', unicode: '🟣', vault: 'bgen' },
+  donut: { emoji: 'purple_1', label: 'Donut', unicode: '🟣', vault: 'bgen' },
+  hypixel: { emoji: 'purple_1', label: 'Hypixel', unicode: '🟣', vault: 'bgen' },
+  // Premium (optional pool)
+  mcfa: { emoji: 'blue_sparkle', label: 'MCFA', unicode: '💎', vault: 'pgen' }
 };
 
 function resolveEmoji(guild, key) {
   const meta = PRODUCT_KEYS[key] || { emoji: key, unicode: '📦', label: key };
   if (!guild) return meta.unicode || '📦';
   const name = meta.emoji;
-  const found = guild.emojis.cache.find(
-    (e) => e.name.toLowerCase() === String(name).toLowerCase()
-  );
+  const found =
+    guild.emojis.cache.find((e) => e.name.toLowerCase() === String(name).toLowerCase()) ||
+    null;
   if (found) return found.toString();
+  // also try client-wide if passed later
   return meta.unicode || '📦';
 }
 
@@ -35,19 +40,30 @@ function getData() {
   const d = dataStore.get();
   if (!d.stocks) d.stocks = {};
   if (!d.methods) d.methods = {};
-  if (!d.fgen) d.fgen = {}; // free gen pools by item key
-  if (!d.pgen) d.pgen = {}; // premium gen
+  if (!d.fgen) d.fgen = {};
+  if (!d.bgen) d.bgen = {};
+  if (!d.pgen) d.pgen = {};
   if (!d.tutorials) d.tutorials = {};
   if (!d.genConfig) {
     d.genConfig = {
-      freeRoleId: process.env.FREE_GEN_ROLE_ID || '1555784683290370058',
-      premiumRoleId: process.env.PREMIUM_GEN_ROLE_ID || '1555784773748654153',
-      announceChannelId: process.env.GEN_ANNOUNCE_CHANNEL_ID || '1553617811291775067',
-      restockUserId: process.env.RESTOCK_USER_ID || '1541659394188509215',
-      freeStatusText: process.env.FREE_STATUS_TEXT || 'Free g3n at discord.gg/PKtNdEAGC',
-      statusInvite: process.env.STATUS_INVITE || 'discord.gg/PKtNdEAGC'
+      freeRoleId: process.env.FREE_GEN_ROLE_ID || '1555427829800239175',
+      premiumRoleId: process.env.PREMIUM_GEN_ROLE_ID || '1556280665140363274',
+      boosterRoleId: process.env.BOOSTER_GEN_ROLE_ID || '',
+      freeChannelId: process.env.FREE_GEN_CHANNEL_ID || '1555793184250929325',
+      boosterChannelId: process.env.BOOSTER_GEN_CHANNEL_ID || '1555793184250929325',
+      premiumChannelId: process.env.PREMIUM_GEN_CHANNEL_ID || '1555793184250929325',
+      cmdChannelId: process.env.CMD_CHANNEL_ID || '1553617826814890085',
+      vouchChannelId: process.env.VOUCH_CHANNEL_ID || '1556279907838074970',
+      vouchUserId: process.env.VOUCH_USER_ID || '1556221818325696512',
+      announceChannelId: process.env.GEN_ANNOUNCE_CHANNEL_ID || '',
+      restockUserId: process.env.RESTOCK_USER_ID || '1398979148063571989',
+      premiumSellerId: process.env.PREMIUM_SELLER_ID || '1398979148063571989',
+      premiumPrice: process.env.PREMIUM_PRICE || '$5',
+      freeStatusText: process.env.FREE_STATUS_TEXT || 'Free G3n at discord.gg/TcU29KHkAt',
+      statusInvite: process.env.STATUS_INVITE || 'TcU29KHkAt'
     };
   }
+  // merge env overrides if set later
   return d;
 }
 
@@ -64,65 +80,71 @@ function addStock(pool, key, line) {
 function takeStock(pool, key) {
   const d = getData();
   const map = d[pool] || {};
-  const arr = map[key] || [];
-  if (!arr.length) return null;
-  const item = arr.shift();
+  if (!map[key] || !map[key].length) return null;
+  const line = map[key].shift();
   dataStore.save();
-  return item;
+  return line;
 }
 
 function countStock(pool, key) {
   const d = getData();
-  return ((d[pool] || {})[key] || []).length;
-}
-
-async function announceAdd(client, guild, pool, key, addedCount, authorTag) {
-  const d = getData();
-  const chId = d.genConfig.announceChannelId;
-  if (!chId) return;
-  const ch = await guild.channels.fetch(chId).catch(() => null);
-  if (!ch?.isTextBased?.()) return;
-  const roleId = pool === 'fgen' ? d.genConfig.freeRoleId : d.genConfig.premiumRoleId;
-  const em = resolveEmoji(guild, key);
-  const label = (PRODUCT_KEYS[key] || { label: key }).label;
-  await ch
-    .send({
-      content: roleId ? `<@&${roleId}>` : undefined,
-      embeds: [
-        E(
-          `${em} Stock restock`,
-          `**${addedCount}** × **${label}** (\`${key}\`) added to **${pool === 'fgen' ? 'Free' : 'Premium'} gen**\nBy **${authorTag}**`,
-          brand.green
-        )
-      ],
-      allowedMentions: { roles: roleId ? [roleId] : [] }
-    })
-    .catch(() => {});
+  return (d[pool]?.[key] || []).length;
 }
 
 function listPool(guild, pool) {
   const d = getData();
   const map = d[pool] || {};
+  const keys = Object.keys(PRODUCT_KEYS).filter((k) => {
+    const v = PRODUCT_KEYS[k].vault;
+    if (pool === 'fgen') return v === 'fgen';
+    if (pool === 'bgen') return v === 'bgen';
+    if (pool === 'pgen') return v === 'pgen';
+    return true;
+  });
+  // unique labels (xboxcode -> xbox_code)
+  const seen = new Set();
   const lines = [];
-  for (const key of Object.keys(PRODUCT_KEYS)) {
-    const n = (map[key] || []).length;
-    const em = resolveEmoji(guild, key);
-    lines.push(`${em} **${PRODUCT_KEYS[key].label}** \`${key}\` · **${n}**`);
+  for (const k of keys) {
+    if (k === 'xboxcode') continue;
+    const n = (map[k] || []).length;
+    const em = resolveEmoji(guild, k);
+    lines.push(`${em} \`${PRODUCT_KEYS[k].label}\` → **${n}**`);
   }
-  for (const key of Object.keys(map)) {
-    if (PRODUCT_KEYS[key]) continue;
-    lines.push(`📦 **${key}** · **${(map[key] || []).length}**`);
+  // also show any extra keys in pool
+  for (const k of Object.keys(map)) {
+    if (PRODUCT_KEYS[k] || k === 'xboxcode') continue;
+    lines.push(`📦 \`${k}\` → **${map[k].length}**`);
   }
-  return lines.join('\n') || 'Empty';
+  return lines.length ? lines.join('\n') : '_Empty_';
+}
+
+async function announceAdd(client, pool, key, byTag, added) {
+  const d = getData();
+  const chId = d.genConfig?.announceChannelId;
+  if (!chId || !client) return;
+  const ch = await client.channels.fetch(chId).catch(() => null);
+  if (!ch) return;
+  const label = PRODUCT_KEYS[key]?.label || key;
+  await ch
+    .send({
+      embeds: [
+        E(
+          'Restock',
+          `**${pool}** · **${label}** +${added} by ${byTag}\nTotal: **${countStock(pool, key)}**`,
+          brand.green
+        )
+      ]
+    })
+    .catch(() => {});
 }
 
 module.exports = {
   PRODUCT_KEYS,
   resolveEmoji,
-  getData,
   addStock,
   takeStock,
   countStock,
   announceAdd,
-  listPool
+  listPool,
+  getData
 };

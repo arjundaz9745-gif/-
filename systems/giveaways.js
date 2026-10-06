@@ -2,6 +2,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const dataStore = require('../utils/data');
 const brand = require('../config/brand');
 const { E } = require('../utils/embeds');
+const { isSbanActive } = require('./sban');
 
 function giveawayEmbed(g, ended = false) {
   const mins = Math.ceil(Math.max(0, g.ends - Date.now()) / 60000);
@@ -35,7 +36,7 @@ async function endGiveaway(client, messageId) {
   const g = data.giveaways?.[messageId];
   if (!g || g.ended) return;
   g.ended = true;
-  const pool = [...new Set(g.entries || [])];
+  const pool = [...new Set(g.entries || [])].filter((id) => !isSbanActive(id));
   const winners = [];
   for (let i = 0; i < g.winners && pool.length; i++) {
     winners.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
@@ -54,4 +55,4 @@ async function endGiveaway(client, messageId) {
     .catch(() => {});
 }
 
-module.exports = { giveawayEmbed, giveawayRow, endGiveaway };
+module.exports = { giveawayEmbed, giveawayRow, endGiveaway, isSbanActive };

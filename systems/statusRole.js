@@ -1,28 +1,33 @@
-/**
- * Vanity status → role (free / premium / booster tutorials)
- */
-const { ActivityType } = require('discord.js');
+const { ActivityType, EmbedBuilder } = require('discord.js');
 const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 
 function getCfg() {
   const d = dataStore.get();
-  if (!d.genConfig) d.genConfig = {};
-  return {
-    freeRoleId: d.genConfig.freeRoleId || process.env.FREE_GEN_ROLE_ID || '1555784683290370058',
-    premiumRoleId: d.genConfig.premiumRoleId || process.env.PREMIUM_GEN_ROLE_ID || '1555784773748654153',
-    boosterRoleId: d.genConfig.boosterRoleId || process.env.BOOSTER_GEN_ROLE_ID || '',
-    restockUserId: d.genConfig.restockUserId || process.env.RESTOCK_USER_ID || '1541659394188509215',
-    freeStatusText: d.genConfig.freeStatusText || process.env.FREE_STATUS_TEXT || 'Free g3n at discord.gg/PKtNdEAGC',
-    statusInvite: d.genConfig.statusInvite || 'discord.gg/PKtNdEAGC'
-  };
+  if (!d.genConfig) {
+    d.genConfig = {
+      freeRoleId: process.env.FREE_GEN_ROLE_ID || '1555427829800239175',
+      premiumRoleId: process.env.PREMIUM_GEN_ROLE_ID || '1556280665140363274',
+      freeChannelId: process.env.FREE_GEN_CHANNEL_ID || '1555793184250929325',
+      boosterChannelId: process.env.BOOSTER_GEN_CHANNEL_ID || '1555793184250929325',
+      premiumChannelId: process.env.PREMIUM_GEN_CHANNEL_ID || '1555793184250929325',
+      cmdChannelId: process.env.CMD_CHANNEL_ID || '1553617826814890085',
+      vouchUserId: process.env.VOUCH_USER_ID || '1556221818325696512',
+      premiumSellerId: process.env.PREMIUM_SELLER_ID || '1398979148063571989',
+      premiumPrice: process.env.PREMIUM_PRICE || '$5',
+      freeStatusText: process.env.FREE_STATUS_TEXT || 'Free G3n at discord.gg/TcU29KHkAt',
+      statusInvite: process.env.STATUS_INVITE || 'TcU29KHkAt'
+    };
+  }
+  return d.genConfig;
 }
 
 function memberStatusText(member) {
-  const acts = member?.presence?.activities || [];
+  const presence = member?.presence;
+  if (!presence?.activities?.length) return '';
   const parts = [];
-  for (const a of acts) {
+  for (const a of presence.activities) {
     if (a.state) parts.push(a.state);
     if (a.name && a.type === ActivityType.Custom) parts.push(a.name);
     if (a.details) parts.push(a.details);
@@ -37,7 +42,7 @@ function hasRequiredStatus(member) {
   const inv = (cfg.statusInvite || '').toLowerCase();
   if (needle && text.includes(needle)) return true;
   if (inv && text.includes(inv)) return true;
-  if (text.includes('free g3n') && text.includes('discord.gg')) return true;
+  if (text.includes('free g3n') && (text.includes('.gg/') || text.includes('discord.gg'))) return true;
   return false;
 }
 
@@ -55,41 +60,89 @@ async function checkAndGrant(member) {
   return { ok: false };
 }
 
-const DEFAULT_TUTORIALS = {
-  free: {
-    title: '🟢 UNLOCK FREE GEN ACCESS',
-    body:
-      'Add our link to your **Discord status** to get **Free gen** access!\n\n' +
-      '📌 **Copy & paste status text:**\n```\nFree g3n at discord.gg/PKtNdEAGC\n```\n\n' +
-      '👉 Once updated, use `&cstatus` — your free role is granted automatically!\n\n' +
-      'Then use `&fgen <item>` to claim.'
-  },
-  premium: {
-    title: '⭐ PREMIUM GEN',
-    body:
-      '**Premium gen** — paid tier\n\n' +
-      '• Working accounts · daily restock\n' +
-      '• Valid longer · priority stock\n' +
-      '• Special features\n\n' +
-      'Pay **$5 / ₹480.70** then open a ticket.\n' +
-      'Use `&pgen <item>` after you have the premium role.'
-  },
-  booster: {
-    title: '🚀 BOOSTER TIER',
-    body:
-      'Server **boosters** (1×+) get booster perks.\n\n' +
-      'Same as free unlock via status, plus extra stock types when configured.\n' +
-      'Boost the server, then ask staff if the role is missing.'
-  }
-};
+/** Full access guide (staff posts with &access) */
+function accessGuideEmbed(guild) {
+  const cfg = getCfg();
+  const freeCh = cfg.freeChannelId ? `<#${cfg.freeChannelId}>` : '#free';
+  const boostCh = cfg.boosterChannelId ? `<#${cfg.boosterChannelId}>` : '#booster';
+  const premCh = cfg.premiumChannelId ? `<#${cfg.premiumChannelId}>` : '#premium';
+  const cmdCh = cfg.cmdChannelId ? `<#${cfg.cmdChannelId}>` : '#cmd';
+  const seller = cfg.premiumSellerId ? `<@${cfg.premiumSellerId}>` : 'owner';
+  const STATUS = cfg.freeStatusText || 'Free G3n at discord.gg/TcU29KHkAt';
+
+  // resolve optional emoji names
+  const em = (names, fb) => {
+    if (!guild?.emojis?.cache) return fb;
+    for (const n of names) {
+      const f = guild.emojis.cache.find((e) => e.name.toLowerCase() === n.toLowerCase());
+      if (f) return f.toString();
+    }
+    return fb;
+  };
+  const hashtag = em(['hashtag'], '#');
+  const verified = em(['verified'], '✅');
+  const arrow = em(['arrow_1'], '»');
+
+  const body = [
+    `${arrow} **FREE G3N**`,
+    `${verified} Put this in your Discord **custom status**:`,
+    '',
+    '```',
+    STATUS,
+    '```',
+    '',
+    `${arrow} Then go to ${cmdCh} and run:`,
+    '',
+    '```',
+    '&cstatus',
+    '```',
+    '',
+    `${verified} Once verified you get free-gen access.`,
+    `${verified} Keep the status on or access can be removed.`,
+    '',
+    `${arrow} **How to use Free G3n**`,
+    `${verified} Open ${freeCh}`,
+    `${verified} Run \`&fgen <service>\` (example: \`&fgen mcnfa\`)`,
+    `${verified} Check stock: \`&stock\``,
+    '',
+    '────────────────────',
+    '',
+    `${arrow} **BOOSTER G3N**`,
+    `${verified} Boost the server to unlock booster gen.`,
+    `${verified} Channel: ${boostCh}`,
+    `${verified} Command: \`&bgen <service>\``,
+    '',
+    '────────────────────',
+    '',
+    `${arrow} **PREMIUM G3N**`,
+    `${verified} Price: **${cfg.premiumPrice || '$5'}**`,
+    `${verified} DM ${seller} to buy access.`,
+    `${verified} Channel: ${premCh} · Command: \`&pgen <service>\``,
+    '',
+    '────────────────────',
+    '',
+    `${hashtag} **CHANNELS**`,
+    `${arrow} Free: ${freeCh}`,
+    `${arrow} Booster: ${boostCh}`,
+    `${arrow} Premium: ${premCh}`,
+    '',
+    `${hashtag} **COMMANDS**`,
+    `${arrow} \`&fgen <service>\` · \`&bgen <service>\` · \`&pgen <service>\``,
+    `${arrow} \`&stock\` · \`&cstatus\``,
+    '',
+    `${verified} Vouch after gen when asked. Use the right channel.`
+  ].join('\n');
+
+  return new EmbedBuilder()
+    .setTitle(`${hashtag} ACCESS GUIDE`)
+    .setDescription(body)
+    .setColor(0x0d1117)
+    .setFooter({ text: 'FlareCloud · Access Guide' });
+}
 
 function tutorialEmbed(key) {
-  const d = dataStore.get();
-  const custom = d.tutorials?.[key];
-  const def = DEFAULT_TUTORIALS[key] || { title: key, body: 'Not set.' };
-  const title = custom?.title || def.title;
-  const body = custom?.body || def.body;
-  return E(title, body, brand.gold);
+  // old free/premium/booster tutorials → single access guide
+  return accessGuideEmbed(null);
 }
 
 module.exports = {
@@ -97,6 +150,6 @@ module.exports = {
   hasRequiredStatus,
   checkAndGrant,
   tutorialEmbed,
-  DEFAULT_TUTORIALS,
+  accessGuideEmbed,
   memberStatusText
 };
