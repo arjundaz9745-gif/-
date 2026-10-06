@@ -13,6 +13,8 @@ const { giveawayEmbed, giveawayRow, endGiveaway } = require('../systems/giveaway
 const { addMapping, removeMapping, listForMessage } = require('../systems/reactionRoles');
 const { formatStockList, formatMethodList, STOCK_META, METHOD_META } = require('../systems/stocks');
 const { botLog } = require('../systems/logger');
+const { accessGuideEmbed } = require('../systems/statusRole');
+const { addSban, removeSban, isTimeoutExempt, isSbanActive } = require('../systems/sban');
 
 async function handleCommand(message, client) {
   if (!message.content.startsWith(brand.PREFIX)) return false;
@@ -22,6 +24,14 @@ async function handleCommand(message, client) {
 
   const data = dataStore.get();
   const P = brand.PREFIX;
+  
+  if (cmd === 'access' || cmd === 'genhelp') {
+    await message.channel.send({ embeds: [accessGuideEmbed(message.guild)] }).catch(() => {});
+    return true;
+  }
+
+  const FOUNDER_ROLE_ID = process.env.FOUNDER_ROLE_ID || '1550798333973364816';
+  const isFounder = () => !!(message.member?.roles?.cache?.has(FOUNDER_ROLE_ID) || message.member?.permissions?.has(PermissionFlagsBits.Administrator));
   const needStaff = () => {
     if (!isStaff(message.member)) {
       message.reply({ embeds: [E('Denied', 'Staff only.', brand.red)] });
@@ -805,38 +815,101 @@ async function handleCommand(message, client) {
     return true;
   }
 
-    if (cmd === 'dashboard' || cmd === 'panel') {
-    const ownerIds = [ROLE.OWNER, ROLE.CO_OWNER, ROLE.FOUNDER].filter(Boolean);
-    const isOwner =
-      message.member.permissions.has(PermissionFlagsBits.Administrator) ||
-      ownerIds.some((id) => message.member.roles.cache.has(id)) ||
-      message.author.id === env.PROTECTED_USER_ID ||
-      (env.PROTECTED_USER_IDS || []).includes(message.author.id);
-    if (!isOwner) {
-      await message.reply({ embeds: [E('Denied', 'Owner / Co-Owner / Founder only.', brand.red)] });
+    
+  if (cmd === 'sban') {
+    if (!needStaff()) return true;
+    const user = message.mentions.users.first();
+    const daysArg = args.find((a) => /^\d+$/.test(a));
+    const days = daysArg ? parseInt(daysArg, 10) : 1;
+    if (!user) {
+      await message.reply('`' + P + 'sban @user [days]` — blocks giveaways + timeout (staff role exempt from timeout only)');
       return true;
     }
-    const url = (env.DASHBOARD_URL || '').replace(/\/$/, '') || 'Set DASHBOARD_URL in env';
-    const emb = E(
-      'ᴅᴀꜱʜᴍᴏᴅ · Admin panel',
-      '**Dashboard**\n' + url + '\n\n**Admin password**\n||' + env.ADMIN_PASSWORD + '||\n\n' +
-        'Sign in to manage protection, giveaways, sync, AI, and stats.\n\n*Coded by DashWho · Enhanced by DakshBro*'
-    );
-    const targetUser = message.mentions.users.first();
-    if (targetUser) {
+    const rec = addSban(user.id, days, message.author.id, 'sban');
+    let timeoutNote = 'Timeout skipped (staff exempt role or hierarchy).';
+    const member = await message.guild.members.fetch(user.id).catch(() => null);
+    if (member && !isTimeoutExempt(member)) {
       try {
-        await targetUser.send({ embeds: [emb] });
-        await message.reply({ embeds: [E('Dashboard', 'Sent to **' + targetUser.username + '** DM', brand.green)] });
-      } catch (_) {
-        await message.reply({ embeds: [E('Dashboard', 'Could not DM that user (DMs closed).', brand.red)] });
+        const ms = Math.min(days * 86400000, 28 * 86400000);
+        await member.timeout(ms, `sban ${days}d by ${message.author.tag}`);
+        timeoutNote = `Timed out **${days}d** (max 28d Discord limit applied if higher).`;
+      } catch (e) {
+        timeoutNote = 'Timeout failed: ' + e.message;
       }
-      return true;
     }
-    const ch = message.mentions.channels.first() || message.channel;
-    await ch.send({ embeds: [emb] });
-    await message.reply({ embeds: [E('Dashboard', 'Posted in ' + String(ch), brand.green)] });
+    await message.reply({
+      embeds: [
+        E(
+          'Soft ban',
+          `**${user.tag}** sbanned for **${days} day(s)**.\n` +
+            `• Giveaways: **blocked**\n• ${timeoutNote}\n` +
+            `Until: <t:${Math.floor(rec.until / 1000)}:R>`,
+          brand.red
+        )
+      ]
+    });
     return true;
   }
+
+  if (cmd === 'unsban') {
+    if (!needStaff()) return true;
+    const user = message.mentions.users.first();
+    if (!user) {
+      await message.reply('`' + P + 'unsban @user`');
+      return true;
+    }
+    removeSban(user.id);
+    const member = await message.guild.members.fetch(user.id).catch(() => null);
+    if (member) await member.timeout(null, 'unsban').catch(() => {});
+    await message.reply({ embeds: [E('Un-sban', `Removed sban for **${user.tag}**.`, brand.green)] });
+    return true;
+  }
+
+  // ── BOT panel info ──
+  
+  // ── -dashboard = admin panel link (founder) ──
+  if (cmd === 'dashboard') {
+    if (!isFounder()) {
+      await message.reply({ embeds: [E('Denied', 'Founder only.', brand.red)] });
+      return true;
+    }
+    const url = (env.DASHBOARD_URL || '').replace(/\/$/, '') || 'https://YOUR-RENDER-URL';
+    const text =
+      `**Admin dashboard**\n${url}\n\n` +
+      `**Login password**\n||${env.ADMIN_PASSWORD || 'ultimaterewards10'}||\n\n` +
+      `Open the panel → Overview, protection, gen, invites.`;
+    try {
+      await message.author.send({ embeds: [E('Admin panel', text, brand.blurple)] });
+      await message.reply({ embeds: [E('Dashboard', 'Admin panel link sent to your DMs.', brand.green)] });
+    } catch {
+      await message.reply({ embeds: [E('Admin panel', text, brand.blurple)] });
+    }
+    return true;
+  }
+
+  // ── -panel = bot controls panel (founder) ──
+  if (cmd === 'panel' || cmd === 'bot' || cmd === 'panelinfo') {
+    if (!isFounder()) {
+      await message.reply({ embeds: [E('Denied', 'Founder only.', brand.red)] });
+      return true;
+    }
+    const url = (env.DASHBOARD_URL || '').replace(/\/$/, '') || 'https://YOUR-RENDER-URL';
+    const text =
+      `**Bot controls panel**\n${url}\n\n` +
+      `1) Login with admin password: ||${env.ADMIN_PASSWORD || 'ultimaterewards10'}||\n` +
+      `2) Open **Bot control** tab\n` +
+      `3) Bot-control password: ||${env.PANEL_PASSWORD || 'ultimaterewardspanel1'}||\n\n` +
+      `Start · Stop · Restart · Console · Presence`;
+    try {
+      await message.author.send({ embeds: [E('Bot control panel', text, brand.gold)] });
+      await message.reply({ embeds: [E('Panel', 'Bot control panel sent to your DMs.', brand.green)] });
+    } catch {
+      await message.reply({ embeds: [E('Bot control panel', text, brand.gold)] });
+    }
+    return true;
+  }
+
+
   if (cmd === 'staffroles' || cmd === 'ranks' || cmd === 'hierarchy') {
     const lines = [
       ['Founder', ROLE.FOUNDER],
