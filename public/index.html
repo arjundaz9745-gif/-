@@ -546,11 +546,25 @@ async function refreshAll() {
     const gwCount = $('#st-gw'); if (gwCount) gwCount.textContent = st.activeGiveaways != null ? String(st.activeGiveaways) : '0';
     const ai = $('#st-ai'); if (ai) ai.textContent = st.aiKey ? 'yes' : 'no';
     const ul = $('#user-label'); if (ul) ul.textContent = st.userLabel || 'Staff team';
-    const inv = $('#inv-top');
-    if (inv && st.topInvites) {
-      inv.innerHTML = st.topInvites.length
-        ? st.topInvites.map((r) => '<div class="list-item"><strong>' + r.id + '</strong> · ' + r.total + '</div>').join('')
-        : 'None yet.';
+    const inv = $('#invite-list') || $('#inv-top');
+    if (inv) {
+      if (st.topInvites && st.topInvites.length) {
+        inv.innerHTML = st.topInvites.map((r) =>
+          '<div class="list-item"><strong>' + (r.name || r.id) + '</strong> · <b>' + r.total + '</b> invites</div>'
+        ).join('');
+      } else {
+        inv.innerHTML = 'No invite data yet.<br/>Track with Falcon <code>-i</code> / <code>-invites</code> or bot invite tracking.';
+      }
+    }
+    const msgL = $('#msg-list');
+    if (msgL) {
+      if (st.topMessages && st.topMessages.length) {
+        msgL.innerHTML = st.topMessages.map((r) =>
+          '<div class="list-item"><strong>' + (r.name || r.id) + '</strong> · <b>' + r.count + '</b> msgs</div>'
+        ).join('');
+      } else {
+        msgL.innerHTML = 'No message stats yet. Counts update as people chat.';
+      }
     }
     if (st.protection) {
       setSwitch($('#sw-automod'), st.protection.automod);
