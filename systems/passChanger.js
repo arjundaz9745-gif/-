@@ -127,8 +127,20 @@ async function handlePassMessage(message, client) {
         '\n```';
     }
     const d = result.details || {};
-    if (d.exists && d.exists.text) desc += '\n\n_Existence:_ ' + d.exists.text;
-    if (d.password && d.password.stage) desc += '\n_Stage:_ ' + d.password.stage;
+    if (d.exists) {
+      if (d.exists.exists === false) desc += "\n\n_Existence:_ account not found";
+      else if (d.exists.exists === true) {
+        desc += '\n\n_Existence:_ account found';
+        if (d.exists.hasPassword === true) desc += ' (password login available)';
+        if (d.exists.hasPassword === false) desc += ' (no password / code only)';
+        if (d.exists.preferOther) desc += ' (other-ways preferred, password still tried)';
+      }
+    }
+    if (d.steps && d.steps.length) {
+      const last = d.steps[d.steps.length - 1];
+      if (last && last.raw) desc += '\n_MS raw:_ ' + String(last.raw).slice(0, 120);
+    }
+
     try {
       await wait.edit({ embeds: [E(title, desc, color)] });
     } catch (_) {
