@@ -270,6 +270,39 @@ function mergeCookie(a, b) {
     .join('; ');
 }
 
+
+/** Existence check without proxy (works more often on free tier) */
+async function getCredentialTypeDirect(email) {
+  const res = await fetch('https://login.live.com/GetCredentialType.srf?mkt=EN-US&id=292841', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+      'User-Agent': UA,
+      Origin: 'https://login.live.com',
+      Referer: 'https://login.live.com/'
+    },
+    body: JSON.stringify({
+      username: email,
+      uaid: '',
+      isOtherIdpSupported: true,
+      checkPhones: false,
+      isRemoteNGCSupported: true,
+      isCookieBannerShown: false,
+      isFidoSupported: true,
+      forceotclogin: false,
+      otclogindisallowed: false,
+      isExternalFederationDisallowed: false,
+      isRemoteConnectSupported: false,
+      federationFlags: 0,
+      isSignup: false,
+      flowToken: ''
+    })
+  });
+  const data = await res.json().catch(() => null);
+  return { data, http: res.status };
+}
+
 async function getCredentialType(email) {
   let cookies = '';
   try {
@@ -536,6 +569,23 @@ async function checkMicrosoft(email, password) {
     if (m) return { ...m, details };
   }
 
+  // Free: try GetCredentialType direct (no proxy) — existence often works from Render
+  try {
+    const directCt = await getCredentialTypeDirect(email);
+    details.directCt = directCt.data;
+    const info = fromCredentialType(directCt.data);
+    details.exists = info;
+    details.steps.push('direct-ct');
+    if (info.known && info.exists === false) {
+      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+    }
+    if (info.msg === MSG.NOT_LOGINABLE && info.hasPassword === false) {
+      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
+    }
+  } catch (e) {
+    details.directCtError = e.message;
+  }
+
   const maxRounds = Math.max(1, _proxyList.length || 1);
   let lastUnknown = null;
 
@@ -610,12 +660,25 @@ async function checkMicrosoft(email, password) {
     lastUnknown = details.proxyUsed;
   }
 
-  const tip = _proxyList.length
-    ? 'All ' +
-      _proxyList.length +
-      ' proxies blocked by Microsoft (free Webshare = datacenter). Need residential proxy or PASS_WORKER_URL.'
-    : 'Set MS_CHECK_PROXIES with your proxy list.';
+  // Free path: still return useful existence info when we have it
+  if (details.exists && details.exists.known) {
+    if (details.exists.exists === false) {
+      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+    }
+    if (details.exists.hasPassword === false) {
+      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
+    }
+    if (details.exists.exists === true) {
+      const msg =
+        'Account exists — password could not be verified on free/datacenter IPs. ' +
+        'Use a residential proxy or PASS_WORKER_URL for full password check.';
+      return { ok: false, summary: msg, error: msg, details };
+    }
+  }
 
+  const tip =
+    'Could not reach Microsoft login from free proxies. ' +
+    'Email existence also unknown. Try again later or use residential / worker.';
   return { ok: false, summary: tip, error: tip, details: { ...details, lastUnknown } };
 }
 
