@@ -1,12 +1,17 @@
 {
   "name": "dashmod-bot",
   "version": "1.0.0",
-  "description": "ᴅᴀꜱʜᴍᴏᴅ | ᴘɪɴɢ = ᴍᴜᴛᴇ — Coded by DashWho · Enhanced by DakshBro",
+  "description": "\u1d05\u1d00\ua731\u029c\u1d0d\u1d0f\u1d05 | \u1d18\u026a\u0274\u0262 = \u1d0d\u1d1c\u1d1b\u1d07 \u2014 Coded by DashWho \u00b7 Enhanced by DakshBro",
   "main": "index.js",
-  "scripts": { "start": "node index.js" },
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "discord.js": "^14.18.0",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "socks-proxy-agent": "^8.0.5"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }
