@@ -1,12 +1,14 @@
 /**
- * Pass changer — queue + optional worker + manual complete from panel
- * Commands: &pass / $pass / -pass  email:password [newPassword]
+ * Pass changer + Microsoft checker
+ * &pass / -pass  email:password [newPassword]
+ * &check / -check email:password
  */
 const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 const { isStaff } = require('../utils/staff');
 const { PermissionFlagsBits } = require('discord.js');
+const { checkMicrosoft } = require('./msCheck');
 
 function getPassData() {
   const d = dataStore.get();
@@ -78,22 +80,79 @@ async function handlePassMessage(message, client) {
   if (!raw.startsWith('&') && !raw.startsWith('$') && !raw.startsWith('-')) return false;
 
   const prefix = raw[0];
-  const body = raw.slice(1).trim();
-  const args = body.split(/\s+/);
+  const rest = raw.slice(1).trim();
+  const args = rest.split(/\s+/);
   const cmd = (args.shift() || '').toLowerCase();
-  if (!['pass', 'passchange', 'changepass', 'pc'].includes(cmd)) return false;
+  if (!['pass', 'passchange', 'changepass', 'pc', 'check', 'mscheck', 'chk'].includes(cmd)) {
+    return false;
+  }
 
+  // ── CHECK ──
+  if (['check', 'mscheck', 'chk'].includes(cmd)) {
+    const rawCred = args[0] || '';
+    if (!rawCred.includes(':')) {
+      await message.reply(
+        '**Microsoft checker**\n`' +
+          prefix +
+          'check email:password`\nExample: `' +
+          prefix +
+          'check user@outlook.com:MyPass123`'
+      );
+      return true;
+    }
+    const colon = rawCred.indexOf(':');
+    const email = rawCred.slice(0, colon).trim();
+    const password = rawCred.slice(colon + 1);
+    const wait = await message.reply({
+      embeds: [E('Checking…', 'Probing Microsoft login for `' + email + '`…', brand.blurple)]
+    });
+    let result;
+    try {
+      result = await checkMicrosoft(email, password);
+    } catch (e) {
+      result = { ok: false, summary: e.message, error: e.message, details: {} };
+    }
+    const color = result.ok ? brand.green : brand.red;
+    const title = result.ok ? 'Microsoft check · OK' : 'Microsoft check · Problem';
+    let desc;
+    if (result.ok) {
+      desc = '**Status:** Login looks good\n**Account:** `' + email + '`';
+    } else {
+      const errText = String(result.error || result.summary || 'Unknown error').slice(0, 900);
+      desc =
+        '**Status:** Login problem\n**Account:** `' +
+        email +
+        '`\n\n**Error (copy-paste):**\n```\n' +
+        errText +
+        '\n```';
+    }
+    const d = result.details || {};
+    if (d.exists && d.exists.text) desc += '\n\n_Existence:_ ' + d.exists.text;
+    if (d.password && d.password.stage) desc += '\n_Stage:_ ' + d.password.stage;
+    try {
+      await wait.edit({ embeds: [E(title, desc, color)] });
+    } catch (_) {
+      await message.reply({ embeds: [E(title, desc, color)] });
+    }
+    if (!result.ok && result.error) {
+      await message.channel
+        .send('```\n' + String(result.error).slice(0, 1500) + '\n```')
+        .catch(() => {});
+    }
+    return true;
+  }
+
+  // ── PASS CHANGE ──
   const pc = getPassData();
   if (!pc.enabled && !staffOk(message.member)) {
     await message.reply({ embeds: [E('Pass changer', 'Currently offline.', brand.red)] });
     return true;
   }
 
-  // staff: -pass list / complete
   if (args[0] && ['list', 'queue'].includes(args[0].toLowerCase()) && staffOk(message.member)) {
     const q = pc.queue.slice(-15);
     const lines = q.length
-      ? q.map((j) => `• \`${j.id}\` · ${j.email} · **${j.status}** · <@${j.userId}>`).join('\n')
+      ? q.map((j) => '• `' + j.id + '` · ' + j.email + ' · **' + j.status + '** · <@' + j.userId + '>').join('\n')
       : 'Queue empty.';
     await message.reply({ embeds: [E('Pass queue', lines, brand.blurple)] });
     return true;
@@ -103,27 +162,30 @@ async function handlePassMessage(message, client) {
   let newpass = args[1] || null;
   if (!emailpass || !emailpass.includes(':')) {
     await message.reply(
-      `**Pass changer**\n` +
-        `\`${prefix}pass email:password [newPassword]\`\n` +
-        `Example: \`${prefix}pass user@mail.com:OldPass123 MyNewPass!\`\n` +
-        (staffOk(message.member) ? `Staff: \`${prefix}pass list\`` : '')
+      '**Pass changer**\n`' +
+        prefix +
+        'pass email:password [newPassword]`\nExample: `' +
+        prefix +
+        'pass user@mail.com:OldPass123 MyNewPass!`\n' +
+        (staffOk(message.member) ? 'Staff: `' + prefix + 'pass list`' : '')
     );
     return true;
   }
 
-  const [email, ...rest] = emailpass.split(':');
-  const password = rest.join(':');
+  const parts = emailpass.split(':');
+  const email = parts.shift().trim();
+  const password = parts.join(':');
   if (!newpass) newpass = genPassword();
 
   const job = {
-    id: `pc_${Date.now()}_${message.author.id.slice(-4)}`,
+    id: 'pc_' + Date.now() + '_' + message.author.id.slice(-4),
     userId: message.author.id,
     userTag: message.author.tag,
     channelId: message.channel.id,
     guildId: message.guild.id,
-    email: email.trim(),
-    password,
-    newpass,
+    email: email,
+    password: password,
+    newpass: newpass,
     status: 'queued',
     createdAt: new Date().toISOString()
   };
@@ -133,7 +195,7 @@ async function handlePassMessage(message, client) {
   dataStore.save();
 
   const worker = await tryWorker(job);
-  if (worker.ok && worker.data?.status === 'success') {
+  if (worker.ok && worker.data && worker.data.status === 'success') {
     completeJob(job.id, {
       status: 'success',
       newpass: worker.data.newpass || newpass,
@@ -144,46 +206,61 @@ async function handlePassMessage(message, client) {
         embeds: [
           E(
             'Password changed',
-            `**Email** ||\`\`${email.trim()}\`\`||\n**New password** ||\`\`${worker.data.newpass || newpass}\`\`||`,
+            '**Email** ||`' +
+              email +
+              '`||\n**New password** ||`' +
+              (worker.data.newpass || newpass) +
+              '`||',
             brand.green
           )
         ]
       });
     } catch (_) {}
     await message.reply({
-      embeds: [E('Pass change', `Done for \`${email.trim()}\` — check your DMs.`, brand.green)]
+      embeds: [E('Pass change', 'Done for `' + email + '` — check your DMs.', brand.green)]
     });
     return true;
   }
 
-  if (worker.ok && worker.data?.status === 'pending') {
+  if (worker.ok && worker.data && worker.data.status === 'pending') {
     job.status = 'processing';
     dataStore.save();
+  }
+
+  let note = '_No worker URL — staff will process from the dashboard Pass tab._';
+  if (worker.reason !== 'no_worker') {
+    note = worker.ok ? '_Sent to worker._' : '_Worker: ' + worker.reason + '_';
   }
 
   await message.reply({
     embeds: [
       E(
         'Pass change queued',
-        `Job \`${job.id}\`\nAccount: \`${email.trim()}\`\nNew password set (saved for when job finishes).\n` +
-          `Status: **${job.status}**\n` +
-          (worker.reason === 'no_worker'
-            ? '_No worker URL — staff will process from the dashboard Pass tab._'
-            : worker.ok
-              ? '_Sent to worker._'
-              : `_Worker: ${worker.reason}_`),
+        'Job `' +
+          job.id +
+          '`\nAccount: `' +
+          email +
+          '`\nNew password set (saved for when job finishes).\nStatus: **' +
+          job.status +
+          '**\n' +
+          note,
         brand.gold
       )
     ]
   });
 
-  // DM receipt
   try {
     await message.author.send({
       embeds: [
         E(
           'Pass change request',
-          `Job \`${job.id}\`\nEmail: \`${email.trim()}\`\nRequested new pass: ||\`\`${newpass}\`\`||\nYou will get another DM when it completes.`,
+          'Job `' +
+            job.id +
+            '`\nEmail: `' +
+            email +
+            '`\nRequested new pass: ||`' +
+            newpass +
+            '`||\nYou will get another DM when it completes.',
           brand.blurple
         )
       ]
