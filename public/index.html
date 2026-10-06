@@ -433,16 +433,34 @@ async function api(path, opts={}){
   const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
   const tok=localStorage.getItem(tokenKey); if(tok) headers['X-Admin-Token']=tok;
   const res=await fetch(path,{...opts,headers});
-  const data=await res.json().catch(()=>({}));
-  if(!res.ok) throw new Error(data.error||res.statusText);
+  let data={};
+  try { data = await res.json(); } catch(_) { data = {}; }
+  if(!res.ok) throw new Error(data.error || data.message || res.statusText || ('HTTP '+res.status));
   return data;
 }
-function showApp(){$('#login-view').style.display='none';$('#app').classList.add('open');refreshAll()}
-function showLogin(){localStorage.removeItem(tokenKey);$('#app').classList.remove('open');$('#login-view').style.display='flex'}
+function showApp(){
+  const lv=$('#login-view'); if(lv) lv.style.display='none';
+  const app=$('#app'); if(app) app.classList.add('open');
+  try { refreshAll(); } catch(e) { console.error(e); }
+}
+function showLogin(){
+  localStorage.removeItem(tokenKey);
+  const app=$('#app'); if(app) app.classList.remove('open');
+  const lv=$('#login-view'); if(lv) lv.style.display='flex';
+}
 $('#login-btn').onclick=async()=>{
-  $('#login-err').textContent='';
-  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value})});localStorage.setItem(tokenKey,d.token);showApp()}
-  catch(e){$('#login-err').textContent=e.message||'Login failed'}
+  const err=$('#login-err'); if(err) err.textContent='';
+  const pwEl=$('#pw');
+  const password = (pwEl && pwEl.value ? pwEl.value : '').trim();
+  if(!password){ if(err) err.textContent='Enter password'; return; }
+  try{
+    const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password})});
+    if(!d || !d.token) throw new Error('No token returned');
+    localStorage.setItem(tokenKey,d.token);
+    showApp();
+  }catch(e){
+    if(err) err.textContent=e.message||'Login failed';
+  }
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login-btn').click()});
 $('#logout').onclick=showLogin;
