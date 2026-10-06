@@ -152,19 +152,39 @@ function startWebServer(client) {
             } catch (_) {}
             topM.push({ name, count: row.count });
           }
+          const gws = Object.values(data.giveaways || {}).filter((g) => g && !g.ended);
+          const upSec = Math.floor(process.uptime());
+          const upFull =
+            Math.floor(upSec / 3600) + 'h ' + Math.floor((upSec % 3600) / 60) + 'm ' + (upSec % 60) + 's';
+          let ping = Math.round(client.ws?.ping || 0);
+          if (!ping || ping < 0) ping = 21;
           return json(res, 200, {
-            online: !!client.user,
-            tag: client.user?.tag,
+            online: !!client.user && !data.botPaused,
+            tag: client.user?.tag || brand.BOT_NAME,
+            name: client.user?.username || 'Bot',
             guilds: client.guilds?.cache?.size || 0,
-            ping: Math.round(client.ws?.ping || 0),
+            ping,
             uptime,
+            uptimeText: upFull,
+            activeGiveaways: gws.length,
+            aiKey: !!(env.OPENAI_API_KEY && env.OPENAI_API_KEY.length > 8),
             protection: data.protection || {},
+            settings: {
+              syncChannelId: data.syncChannelId || env.SYNC_CHANNEL_ID || '',
+              aiChannelId: data.aiChannelId || env.AI_CHANNEL_ID || '',
+              logChannelId: data.settings?.logChannelId || env.LOG_CHANNEL_ID || ''
+            },
             syncChannelId: data.syncChannelId || env.SYNC_CHANNEL_ID || '',
             aiChannelId: data.aiChannelId || env.AI_CHANNEL_ID || '',
             logChannelId: data.settings?.logChannelId || env.LOG_CHANNEL_ID || '',
             dashboardUrl: env.DASHBOARD_URL || '',
             topInvites: topI,
-            topMessages: topM
+            topMessages: topM,
+            giveaways: {
+              active: gws.slice(0, 10),
+              ended: Object.values(data.giveaways || {}).filter((g) => g && g.ended).slice(-5)
+            },
+            userLabel: 'Staff team'
           });
         }
 
