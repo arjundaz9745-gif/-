@@ -22,48 +22,216 @@ const MSG = {
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-let _dispatcher = null;
-let _fetchImpl = globalThis.fetch;
-let _proxyUrl = '';
+let _proxyReady = false;
+let _proxyList = []; // full proxy URLs
+let _proxyIndex = 0;
+let _socksAgent = null;
+let _httpDispatcher = null;
+let _activeProxy = '';
 
-function initProxy() {
-  if (_dispatcher !== null) return;
-  _proxyUrl = (
+function parseProxyLine(line) {
+  line = String(line || '').trim();
+  if (!line) return null;
+  if (/^socks/i.test(line) || /^https?:\/\//i.test(line)) return line;
+  // host:port:user:pass
+  const parts = line.split(':');
+  if (parts.length >= 4) {
+    const host = parts[0];
+    const port = parts[1];
+    const user = parts[2];
+    const pass = parts.slice(3).join(':'); // password may contain :
+    return 'http://' + encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@' + host + ':' + port;
+  }
+  if (parts.length === 2) return 'http://' + parts[0] + ':' + parts[1];
+  return null;
+}
+
+function loadProxyList() {
+  const raw =
+    process.env.MS_CHECK_PROXIES ||
     process.env.MS_CHECK_PROXY ||
     process.env.HTTPS_PROXY ||
     process.env.HTTP_PROXY ||
-    process.env.https_proxy ||
-    process.env.http_proxy ||
-    ''
-  ).trim();
+    '';
+  const lines = String(raw)
+    .split(/[\n,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const list = [];
+  for (const line of lines) {
+    const u = parseProxyLine(line);
+    if (u) list.push(u);
+  }
+  return list;
+}
 
+function safeProxy(url) {
+  return String(url || '').replace(/\/\/.*:.*@/, '//***:***@');
+}
+
+function initProxy() {
+  if (_proxyReady) return;
+  _proxyReady = true;
+  _proxyList = loadProxyList();
+  if (!_proxyList.length) {
+    console.log('[msCheck] No proxy set (MS_CHECK_PROXIES / MS_CHECK_PROXY)');
+    return;
+  }
+  console.log('[msCheck] Loaded', _proxyList.length, 'proxies');
+  selectProxy(0);
+}
+
+function selectProxy(index) {
+  if (!_proxyList.length) return;
+  _proxyIndex = index % _proxyList.length;
+  _activeProxy = _proxyList[_proxyIndex];
+  _socksAgent = null;
+  _httpDispatcher = null;
+
+  const isSocks = /^socks/i.test(_activeProxy);
+  if (isSocks) {
+    try {
+      const { SocksProxyAgent } = require('socks-proxy-agent');
+      _socksAgent = new SocksProxyAgent(_activeProxy);
+      console.log('[msCheck] SOCKS', _proxyIndex + 1 + '/' + _proxyList.length, safeProxy(_activeProxy));
+    } catch (e) {
+      console.error('[msCheck] socks-proxy-agent error:', e.message);
+    }
+    return;
+  }
   try {
     const undici = require('undici');
-    _fetchImpl = undici.fetch || globalThis.fetch;
-    if (_proxyUrl) {
-      _dispatcher = new undici.ProxyAgent(_proxyUrl);
-      console.log('[msCheck] Using proxy', _proxyUrl.replace(/\/\/.*:.*@/, '//***:***@'));
-    } else if (undici.EnvHttpProxyAgent) {
-      try {
-        _dispatcher = new undici.EnvHttpProxyAgent();
-      } catch (_) {
-        _dispatcher = false;
-      }
-    } else {
-      _dispatcher = false;
-    }
-  } catch (_) {
-    _dispatcher = false;
-    _fetchImpl = globalThis.fetch;
+    _httpDispatcher = new undici.ProxyAgent(_activeProxy);
+    console.log('[msCheck] HTTP', _proxyIndex + 1 + '/' + _proxyList.length, safeProxy(_activeProxy));
+  } catch (e) {
+    console.error('[msCheck] HTTP proxy error:', e.message);
   }
+}
+
+function rotateProxy() {
+  if (_proxyList.length < 2) return false;
+  selectProxy(_proxyIndex + 1);
+  return true;
+}
+
+function headersToObject(headers) {
+  const out = { 'User-Agent': UA };
+  if (!headers) return out;
+  if (typeof headers.forEach === 'function') {
+    headers.forEach((v, k) => {
+      out[k] = v;
+    });
+  } else {
+    Object.assign(out, headers);
+  }
+  return out;
 }
 
 async function msFetch(url, opts = {}) {
   initProxy();
-  const headers = Object.assign({ 'User-Agent': UA }, opts.headers || {});
-  const o = Object.assign({}, opts, { headers });
-  if (_dispatcher) o.dispatcher = _dispatcher;
-  return _fetchImpl(url, o);
+  const method = (opts.method || 'GET').toUpperCase();
+  const headers = headersToObject(opts.headers);
+  const body = opts.body;
+  const redirect = opts.redirect || 'follow';
+  let current = url;
+  let hops = 0;
+  let useMethod = method;
+  let useBody = body;
+
+  while (hops < 8) {
+    hops++;
+    let res;
+    if (_socksAgent) {
+      res = await socksRequest(current, useMethod, headers, useBody);
+    } else if (_httpDispatcher) {
+      const undici = require('undici');
+      res = await undici.fetch(current, {
+        method: useMethod,
+        headers,
+        body: useBody,
+        redirect: 'manual',
+        dispatcher: _httpDispatcher
+      });
+    } else {
+      res = await fetch(current, { method: useMethod, headers, body: useBody, redirect: 'manual' });
+    }
+
+    const status = res.status;
+    const loc = res.headers.get('location');
+    if (redirect === 'follow' && status >= 300 && status < 400 && loc) {
+      current = new URL(loc, current).toString();
+      if (status !== 307 && status !== 308) {
+        useMethod = 'GET';
+        useBody = undefined;
+      }
+      continue;
+    }
+    return res;
+  }
+  throw new Error('Too many redirects');
+}
+
+function socksRequest(urlStr, method, headers, body) {
+  const http = require('http');
+  const https = require('https');
+  const { URL } = require('url');
+  const u = new URL(urlStr);
+  const isHttps = u.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  const payload = body == null ? null : Buffer.from(String(body), 'utf8');
+  const hdrs = Object.assign({}, headers);
+  if (payload && !hdrs['Content-Length'] && !hdrs['content-length']) {
+    hdrs['Content-Length'] = String(payload.length);
+  }
+  return new Promise((resolve, reject) => {
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port || (isHttps ? 443 : 80),
+        path: u.pathname + u.search,
+        method,
+        headers: hdrs,
+        agent: _socksAgent,
+        timeout: 45000
+      },
+      (inc) => {
+        const chunks = [];
+        inc.on('data', (c) => chunks.push(c));
+        inc.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          const rawHeaders = inc.headers || {};
+          resolve({
+            ok: inc.statusCode >= 200 && inc.statusCode < 300,
+            status: inc.statusCode,
+            headers: {
+              get(name) {
+                const v = rawHeaders[String(name).toLowerCase()];
+                return Array.isArray(v) ? v[0] : v || null;
+              },
+              getSetCookie() {
+                const sc = rawHeaders['set-cookie'];
+                if (!sc) return [];
+                return Array.isArray(sc) ? sc : [sc];
+              }
+            },
+            async text() {
+              return buf.toString('utf8');
+            },
+            async json() {
+              return JSON.parse(buf.toString('utf8') || '{}');
+            }
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('SOCKS proxy timeout'));
+    });
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 
 function cleanEmail(e) {
@@ -352,7 +520,7 @@ async function checkMicrosoft(email, password) {
   initProxy();
   email = cleanEmail(email);
   password = String(password || '');
-  const details = { proxy: !!_proxyUrl, steps: [] };
+  const details = { proxies: _proxyList.length, steps: [] };
 
   if (!email.includes('@')) {
     return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
@@ -368,70 +536,88 @@ async function checkMicrosoft(email, password) {
     if (m) return { ...m, details };
   }
 
-  let ctInfo = { known: false };
-  let cookies = '';
-  try {
-    const ct = await getCredentialType(email);
-    details.credentialType = ct.data;
-    details.steps.push('ct:' + ct.http);
-    cookies = ct.cookies || '';
-    ctInfo = fromCredentialType(ct.data);
-    details.exists = ctInfo;
-    if (ctInfo.known && ctInfo.exists === false) {
-      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
-    }
-    if (ctInfo.msg === MSG.NOT_LOGINABLE && ctInfo.hasPassword === false) {
-      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-    }
-  } catch (e) {
-    details.ctError = e.message;
-  }
+  const maxRounds = Math.max(1, _proxyList.length || 1);
+  let lastUnknown = null;
 
-  // OAuth — definitive codes only
-  const clients = [
-    ['000000004C12AE6F', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
-    ['00000000402b5328', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'], // Minecraft
-    ['1f907974-e22b-4810-a9de-d282292ec59c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access'],
-    ['d3590ed6-52b3-4102-aeff-aad2292ab01c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access']
-  ];
-  for (const [id, url, scope] of clients) {
+  for (let round = 0; round < maxRounds; round++) {
+    if (round > 0) rotateProxy();
+    details.proxyUsed = safeProxy(_activeProxy || 'direct');
+    details.steps.push('round ' + (round + 1) + ' ' + details.proxyUsed);
+
+    let ctInfo = { known: false };
+    let cookies = '';
     try {
-      const r = await oauthTry(email, password, id, url, scope);
-      details.steps.push({ oauth: id, def: r.definitive, msg: r.msg, raw: r.raw });
-      if (r.definitive) {
-        return { ok: !!r.ok, summary: r.msg, error: r.ok ? null : r.msg, details };
+      const ct = await getCredentialType(email);
+      details.credentialType = ct.data;
+      cookies = ct.cookies || '';
+      ctInfo = fromCredentialType(ct.data);
+      details.exists = ctInfo;
+      if (ctInfo.known && ctInfo.exists === false) {
+        return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+      }
+      if (ctInfo.msg === MSG.NOT_LOGINABLE && ctInfo.hasPassword === false) {
+        return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
       }
     } catch (e) {
-      details.steps.push({ oauth: id, err: e.message });
+      details.ctError = e.message;
+      details.steps.push('ct fail: ' + e.message);
+      continue; // try next proxy
     }
-  }
 
-  // HTML password (needs proxy on Render)
-  try {
-    const html = await htmlPasswordCheck(email, password, cookies);
-    details.html = html;
-    if (html.definitive) {
-      return { ok: !!html.ok, summary: html.msg, error: html.ok ? null : html.msg, details };
+    const clients = [
+      ['000000004C12AE6F', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
+      ['00000000402b5328', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
+      ['1f907974-e22b-4810-a9de-d282292ec59c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access'],
+      ['d3590ed6-52b3-4102-aeff-aad2292ab01c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access']
+    ];
+    let definitive = null;
+    for (const [id, url, scope] of clients) {
+      try {
+        const r = await oauthTry(email, password, id, url, scope);
+        details.steps.push({ oauth: id, def: r.definitive, msg: r.msg });
+        if (r.definitive) {
+          definitive = r;
+          break;
+        }
+      } catch (e) {
+        details.steps.push({ oauth: id, err: e.message });
+      }
     }
-  } catch (e) {
-    details.htmlError = e.message;
+    if (definitive) {
+      return {
+        ok: !!definitive.ok,
+        summary: definitive.msg,
+        error: definitive.ok ? null : definitive.msg,
+        details
+      };
+    }
+
+    try {
+      const html = await htmlPasswordCheck(email, password, cookies);
+      details.html = html;
+      if (html.definitive) {
+        return { ok: !!html.ok, summary: html.msg, error: html.ok ? null : html.msg, details };
+      }
+    } catch (e) {
+      details.htmlError = e.message;
+      details.steps.push('html fail: ' + e.message);
+    }
+
+    if (ctInfo.known && ctInfo.exists && ctInfo.hasPassword === false) {
+      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
+    }
+
+    lastUnknown = details.proxyUsed;
   }
 
-  if (ctInfo.known && ctInfo.exists && ctInfo.hasPassword === false) {
-    return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-  }
+  const tip = _proxyList.length
+    ? 'All ' +
+      _proxyList.length +
+      ' proxies blocked by Microsoft (free Webshare = datacenter). Need residential proxy or PASS_WORKER_URL.'
+    : 'Set MS_CHECK_PROXIES with your proxy list.';
 
-  // Honest + actionable
-  const tip = _proxyUrl
-    ? 'Proxy set but Microsoft still blocked. Try another residential proxy or PASS_WORKER_URL.'
-    : 'Set MS_CHECK_PROXY=http://user:pass@host:port (residential) or PASS_WORKER_URL for Selenium.';
-
-  return {
-    ok: false,
-    summary: tip,
-    error: tip,
-    details
-  };
+  return { ok: false, summary: tip, error: tip, details: { ...details, lastUnknown } };
 }
+
 
 module.exports = { checkMicrosoft, MSG };
