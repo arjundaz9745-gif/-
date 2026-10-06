@@ -412,7 +412,7 @@ function showApp(){$('#login-view').style.display='none';$('#app').classList.add
 function showLogin(){localStorage.removeItem(tokenKey);$('#app').classList.remove('open');$('#login-view').style.display='flex'}
 $('#login-btn').onclick=async()=>{
   $('#login-err').textContent='';
-  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value,discordId:($('#discordId')&&$('#discordId').value)||''})});localStorage.setItem(tokenKey,d.token);showApp()}
+  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value})});localStorage.setItem(tokenKey,d.token);showApp()}
   catch(e){$('#login-err').textContent=e.message||'Login failed'}
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login-btn').click()});
