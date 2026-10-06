@@ -20,8 +20,10 @@ const { handleMentions } = require('./systems/pingProtect');
 const { askAI } = require('./systems/ai');
 const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
+const { handlePassMessage } = require('./systems/passChanger');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
+const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
 const { handleCommand } = require('./commands/router');
 const { startWebServer } = require('./web/server');
 const { registerAntiNuke } = require('./systems/antinuke');
@@ -222,7 +224,13 @@ client.on('messageCreate', async (message) => {
   } catch (_) {}
 
   await handleMentions(message).catch((e) => console.error('ping', e.message));
+  const _d = dataStore.get();
+  if (_d.botPaused && !message.member?.permissions?.has?.('Administrator')) {
+    // bot stopped from panel — ignore non-admin
+    return;
+  }
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
+  if (await handlePassMessage(message, client).catch((e) => { console.error('pass', e.message); return false; })) return;
   if (await handleIAmHere(message).catch(() => false)) return;
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
@@ -267,6 +275,7 @@ client.on('interactionCreate', async (interaction) => {
       const data = dataStore.get();
       const g = data.giveaways?.[interaction.message.id];
       if (!g || g.ended) return interaction.reply({ content: 'Ended.', ephemeral: true });
+      if (isSbanActive(interaction.user.id)) return interaction.reply({ content: 'You are giveaway-banned (sban).', ephemeral: true });
       if (!g.entries) g.entries = [];
       if (g.entries.includes(interaction.user.id)) return interaction.reply({ content: 'Already in.', ephemeral: true });
       g.entries.push(interaction.user.id);
