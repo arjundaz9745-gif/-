@@ -428,165 +428,324 @@ textarea{min-height:90px;resize:vertical}
 <script>
 const $ = (s) => document.querySelector(s);
 const tokenKey = 'dashmod_admin_token';
-function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800)}
-async function api(path, opts={}){
-  const headers=Object.assign({'Content-Type':'application/json'},opts.headers||{});
-  const tok=localStorage.getItem(tokenKey); if(tok) headers['X-Admin-Token']=tok;
-  const res=await fetch(path,{...opts,headers});
-  let data={};
-  try { data = await res.json(); } catch(_) { data = {}; }
-  if(!res.ok) throw new Error(data.error || data.message || res.statusText || ('HTTP '+res.status));
+
+function toast(msg) {
+  const t = $('#toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  const tok = localStorage.getItem(tokenKey);
+  if (tok) headers['X-Admin-Token'] = tok;
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  let data = {};
+  try { data = await res.json(); } catch (_) { data = {}; }
+  if (!res.ok) throw new Error(data.error || data.message || res.statusText || ('HTTP ' + res.status));
   return data;
 }
-function showApp(){
-  const lv=$('#login-view'); if(lv) lv.style.display='none';
-  const app=$('#app'); if(app) app.classList.add('open');
-  try { refreshAll(); } catch(e) { console.error(e); }
+
+function showApp() {
+  const lv = $('#login-view'); if (lv) lv.style.display = 'none';
+  const app = $('#app'); if (app) app.classList.add('open');
+  try { refreshAll(); } catch (e) { console.error(e); }
 }
-function showLogin(){
+
+function showLogin() {
   localStorage.removeItem(tokenKey);
-  const app=$('#app'); if(app) app.classList.remove('open');
-  const lv=$('#login-view'); if(lv) lv.style.display='flex';
+  const app = $('#app'); if (app) app.classList.remove('open');
+  const lv = $('#login-view'); if (lv) lv.style.display = 'flex';
 }
-$('#login-btn').onclick=async()=>{
-  const err=$('#login-err'); if(err) err.textContent='';
-  const pwEl=$('#pw');
-  const password = (pwEl && pwEl.value ? pwEl.value : '').trim();
-  if(!password){ if(err) err.textContent='Enter password'; return; }
-  try{
-    const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password})});
-    if(!d || !d.token) throw new Error('No token returned');
-    localStorage.setItem(tokenKey,d.token);
-    showApp();
-  }catch(e){
-    if(err) err.textContent=e.message||'Login failed';
-  }
-};
-$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login-btn').click()});
-$('#logout').onclick=showLogin;
-document.querySelectorAll('.nav button').forEach(btn=>{
-  btn.onclick=()=>{
-    document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    const tab=btn.dataset.tab;
-    document.querySelectorAll('[id^=tab-]').forEach(s=>s.classList.add('hidden'));
-    $('#tab-'+tab).classList.remove('hidden');
-    $('#page-title').textContent=btn.textContent;
-    $('#sidebar').classList.remove('open');$('#overlay').classList.remove('show');
-  };
-});
-$('#menu-btn').onclick=()=>{$('#sidebar').classList.add('open');$('#overlay').classList.add('show')};
-$('#overlay').onclick=()=>{$('#sidebar').classList.remove('open');$('#overlay').classList.remove('show')};
-function setSwitch(el,on){el.classList.toggle('on',!!on);el.dataset.on=on?'1':'0'}
-document.querySelectorAll('.switch').forEach(el=>{el.onclick=()=>setSwitch(el,el.dataset.on!=='1')});
 
-async function refreshAll(){
-  try{
-    const st=await api('/api/admin/status');
-    $('#st-tag').textContent=st.tag||'—';
-    $('#st-online').textContent=st.online?'Online':'Offline';
-    $('#bot-badge').textContent=st.online?'Online':'Offline';
-    $('#bot-badge').classList.toggle('off',!st.online);
-    $('#st-guilds').textContent=st.guilds??'—';
-    $('#st-ping').textContent=st.ping!=null?st.ping+'ms':'—';
-    $('#st-uptime').textContent=st.uptime||'—';
-    $('#st-gw').textContent=st.activeGiveaways??0;
-    $('#st-ai').textContent=st.aiConfigured?'Set':'Missing';
-    setSwitch($('#sw-automod'),st.protection?.automod!==false);
-    setSwitch($('#sw-antiraid'),st.protection?.antiraid!==false);
-    setSwitch($('#sw-antinuke'),st.protection?.antinuke!==false);
-    $('#sync-ch').value=st.syncChannelId||'';
-    $('#ai-ch').value=st.aiChannelId||'';
-    $('#log-ch').value=st.logChannelId||'';
-    $('#ann-url').value=st.dashboardUrl||window.location.origin;
-
-    const inv=st.topInvites||[];
-    $('#invite-list').innerHTML=inv.length?inv.map((r,i)=>`<div class="list-item"><strong>#${i+1}</strong> ${r.name} — <strong>${r.total}</strong></div>`).join(''):'No invite data yet.';
-    const msg=st.topMessages||[];
-    $('#msg-list').innerHTML=msg.length?msg.map((r,i)=>`<div class="list-item"><strong>#${i+1}</strong> ${r.name} — <strong>${r.count}</strong></div>`).join(''):'No message data yet.';
-
-    const active=st.giveawaysActive||[];
-    $('#gw-list').innerHTML=active.length?active.map(g=>`<div class="list-item"><strong>${g.prize}</strong> <span class="chip">active</span><br/>Winners: ${g.winners} · Entries: ${g.entries} · Ends: ${g.endsRel||'—'}</div>`).join(''):'No active giveaways.';
-    const ended=st.giveawaysEnded||[];
-    $('#gw-ended').innerHTML=ended.length?ended.map(g=>`<div class="list-item"><strong>${g.prize}</strong> <span class="chip off">ended</span><br/>${g.winnerTags||'No winners'}</div>`).join(''):'None yet.';
-  }catch(e){if(/401|auth/i.test(e.message))showLogin();else toast(e.message)}
-}
-$('#save-prot').onclick=async()=>{try{await api('/api/admin/protection',{method:'POST',body:JSON.stringify({automod:$('#sw-automod').dataset.on==='1',antiraid:$('#sw-antiraid').dataset.on==='1',antinuke:$('#sw-antinuke').dataset.on==='1'})});toast('Protection saved')}catch(e){toast(e.message)}};
-$('#save-sync').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({syncChannelId:$('#sync-ch').value.trim()})});toast('Sync saved')}catch(e){toast(e.message)}};
-$('#save-ai').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({aiChannelId:$('#ai-ch').value.trim()})});toast('AI channel saved')}catch(e){toast(e.message)}};
-$('#save-log').onclick=async()=>{try{await api('/api/admin/settings',{method:'POST',body:JSON.stringify({logChannelId:$('#log-ch').value.trim()})});toast('Log saved')}catch(e){toast(e.message)}};
-$('#do-export').onclick=async()=>{try{await api('/api/admin/export',{method:'POST',body:'{}'});toast('Export sent')}catch(e){toast(e.message)}};
-$('#do-import').onclick=async()=>{try{const r=await api('/api/admin/import',{method:'POST',body:'{}'});toast(r.ok?'Imported':r.reason)}catch(e){toast(e.message)}};
-$('#do-announce').onclick=async()=>{try{await api('/api/admin/announce',{method:'POST',body:JSON.stringify({channelId:$('#ann-ch').value.trim(),dashboardUrl:$('#ann-url').value.trim(),showPassword:$('#ann-show-pw').checked})});toast('Message sent')}catch(e){toast(e.message)}};
-if(localStorage.getItem(tokenKey))showApp();
-
-let botLogTimer=null;
-async function refreshBot(){
-  try{
-    const d=await api('/api/admin/bot');
-    const nameEl=$('#bot-name'); if(nameEl) nameEl.textContent=d.tag||d.name||'—';
-    const onEl=$('#bot-online');
-    if(onEl){
-      const st=d.paused?'offline (stopped)':(d.online?'online':'offline');
-      onEl.innerHTML='<span style="color:'+(d.paused||!d.online?'#e74c3c':'#2ecc71')+'">●</span> '+st+(d.status&&!d.paused?' · presence '+d.status:'');
+const loginBtn = $('#login-btn');
+if (loginBtn) {
+  loginBtn.onclick = async () => {
+    const err = $('#login-err');
+    if (err) err.textContent = '';
+    const pwEl = $('#pw');
+    const password = (pwEl && pwEl.value ? pwEl.value : '').trim();
+    if (!password) {
+      if (err) err.textContent = 'Enter password';
+      return;
     }
-    const upEl=$('#bot-uptime'); if(upEl) upEl.textContent=d.uptimeText||(d.uptime+'s');
-    const act=$('#bot-activity'); if(act && d.activity!=null && document.activeElement!==act) act.value=d.activity||'';
-  }catch(e){ toast(e.message); }
+    try {
+      const d = await api('/api/admin/login', {
+        method: 'POST',
+        body: JSON.stringify({ password })
+      });
+      if (!d || !d.token) throw new Error('No token returned');
+      localStorage.setItem(tokenKey, d.token);
+      showApp();
+    } catch (e) {
+      if (err) err.textContent = e.message || 'Login failed';
+    }
+  };
 }
-async function refreshBotLogs(){
-  try{
-    const d=await api('/api/admin/bot/logs');
-    const term=$('#bot-terminal');
-    if(!term) return;
-    const lines=d.lines||[];
-    const atBottom=term.scrollHeight-term.scrollTop-term.clientHeight<40;
-    term.textContent=lines.join('
-')||'[no logs yet]';
-    const c=$('#bot-log-count'); if(c) c.textContent=lines.length+' lines';
-    if(atBottom) term.scrollTop=term.scrollHeight;
-  }catch(e){}
+
+const pwInput = $('#pw');
+if (pwInput) {
+  pwInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && loginBtn) loginBtn.click();
+  });
 }
-async function refreshGen(){try{const d=await api('/api/admin/gen');const el=$('#gen-status');if(el)el.textContent=JSON.stringify(d,null,2)}catch(e){const el=$('#gen-status');if(el)el.textContent=e.message}}
-async function refreshPass(){try{const d=await api('/api/admin/pass');const el=$('#pass-status');if(el)el.textContent=JSON.stringify(d,null,2)}catch(e){const el=$('#pass-status');if(el)el.textContent=e.message}}
-function startBotPolling(){
-  refreshBot(); refreshBotLogs();
-  if(botLogTimer) clearInterval(botLogTimer);
-  botLogTimer=setInterval(()=>{refreshBot();refreshBotLogs()},2500);
-}
-function stopBotPolling(){ if(botLogTimer){clearInterval(botLogTimer);botLogTimer=null} }
-const _botStart=$('#bot-start');if(_botStart)_botStart.onclick=async()=>{try{await api('/api/admin/bot/start',{method:'POST',body:'{}'});toast('Started');refreshBot();refreshBotLogs()}catch(e){toast(e.message)}};
-const _botStop=$('#bot-stop');if(_botStop)_botStop.onclick=async()=>{try{await api('/api/admin/bot/stop',{method:'POST',body:'{}'});toast('Stopped');refreshBot();refreshBotLogs()}catch(e){toast(e.message)}};
-const _botRestart=$('#bot-restart');if(_botRestart)_botRestart.onclick=async()=>{try{await api('/api/admin/bot/restart',{method:'POST',body:'{}'});toast('Restarting…')}catch(e){toast(e.message)}};
-document.querySelectorAll('[data-pstatus]').forEach(btn=>{
-  btn.onclick=async()=>{
-    try{
-      const activity=($('#bot-activity')&&$('#bot-activity').value)||'';
-      await api('/api/admin/bot/presence',{method:'POST',body:JSON.stringify({status:btn.dataset.pstatus,activity})});
-      toast('Presence: '+btn.dataset.pstatus);
-      refreshBot();
-    }catch(e){toast(e.message)}
+
+const logoutBtn = $('#logout');
+if (logoutBtn) logoutBtn.onclick = showLogin;
+
+document.querySelectorAll('.nav button').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('[id^=tab-]').forEach((s) => s.classList.add('hidden'));
+    const panel = $('#tab-' + tab);
+    if (panel) panel.classList.remove('hidden');
+    const title = $('#page-title');
+    if (title) title.textContent = btn.textContent;
+    const side = $('#sidebar'); if (side) side.classList.remove('open');
+    const ov = $('#overlay'); if (ov) ov.classList.remove('show');
+    if (tab === 'botctl') startBotPolling();
+    else stopBotPolling();
+    if (tab === 'gen') refreshGen();
+    if (tab === 'pass') refreshPass();
   };
 });
-const _saveP=$('#bot-save-presence');
-if(_saveP)_saveP.onclick=async()=>{
-  try{
-    const activity=($('#bot-activity')&&$('#bot-activity').value)||'';
-    await api('/api/admin/bot/presence',{method:'POST',body:JSON.stringify({status:'online',activity})});
+
+const menuBtn = $('#menu-btn');
+if (menuBtn) menuBtn.onclick = () => {
+  const side = $('#sidebar'); if (side) side.classList.add('open');
+  const ov = $('#overlay'); if (ov) ov.classList.add('show');
+};
+const overlay = $('#overlay');
+if (overlay) overlay.onclick = () => {
+  const side = $('#sidebar'); if (side) side.classList.remove('open');
+  const ov = $('#overlay'); if (ov) ov.classList.remove('show');
+};
+
+function setSwitch(el, on) {
+  if (!el) return;
+  el.classList.toggle('on', !!on);
+  el.dataset.on = on ? '1' : '0';
+}
+document.querySelectorAll('.switch').forEach((el) => {
+  el.onclick = () => setSwitch(el, el.dataset.on !== '1');
+});
+
+async function refreshAll() {
+  try {
+    const st = await api('/api/admin/status');
+    const botEl = $('#stat-bot'); if (botEl) botEl.textContent = st.tag || st.bot || '—';
+    const upEl = $('#stat-uptime'); if (upEl) upEl.textContent = st.uptime || '—';
+    const gEl = $('#stat-guilds'); if (gEl) gEl.textContent = st.guilds != null ? st.guilds : '—';
+    const inv = $('#inv-top');
+    if (inv && st.topInvites) {
+      inv.innerHTML = st.topInvites.length
+        ? st.topInvites.map((r) => '<div class="list-item"><strong>' + r.id + '</strong> · ' + r.total + '</div>').join('')
+        : 'None yet.';
+    }
+    if (st.protection) {
+      setSwitch($('#sw-automod'), st.protection.automod);
+      setSwitch($('#sw-antiraid'), st.protection.antiraid);
+      setSwitch($('#sw-antinuke'), st.protection.antinuke);
+    }
+    if (st.settings) {
+      const a = $('#ai-ch'); if (a && st.settings.aiChannelId != null) a.value = st.settings.aiChannelId || '';
+      const s = $('#sync-ch'); if (s && st.settings.syncChannelId != null) s.value = st.settings.syncChannelId || '';
+      const l = $('#log-ch'); if (l && st.settings.logChannelId != null) l.value = st.settings.logChannelId || '';
+    }
+    const gw = $('#gw-list');
+    if (gw && st.giveaways) {
+      const active = (st.giveaways.active || []).map((g) =>
+        '<div class="list-item"><strong>' + (g.prize || '') + '</strong> <span class="chip">live</span></div>'
+      ).join('');
+      const ended = (st.giveaways.ended || []).map((g) =>
+        '<div class="list-item"><strong>' + (g.prize || '') + '</strong> <span class="chip off">ended</span><br/>' + (g.winnerTags || 'No winners') + '</div>'
+      ).join('');
+      gw.innerHTML = (active || ended) ? (active + ended) : 'None yet.';
+    }
+  } catch (e) {
+    if (/401|auth|Unauthorized/i.test(String(e.message))) showLogin();
+    else toast(e.message);
+  }
+}
+
+const saveProt = $('#save-prot');
+if (saveProt) saveProt.onclick = async () => {
+  try {
+    await api('/api/admin/protection', {
+      method: 'POST',
+      body: JSON.stringify({
+        automod: $('#sw-automod') && $('#sw-automod').dataset.on === '1',
+        antiraid: $('#sw-antiraid') && $('#sw-antiraid').dataset.on === '1',
+        antinuke: $('#sw-antinuke') && $('#sw-antinuke').dataset.on === '1'
+      })
+    });
+    toast('Protection saved');
+  } catch (e) { toast(e.message); }
+};
+
+const saveSync = $('#save-sync');
+if (saveSync) saveSync.onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ syncChannelId: ($('#sync-ch') && $('#sync-ch').value.trim()) || '' }) });
+    toast('Sync saved');
+  } catch (e) { toast(e.message); }
+};
+
+const saveAi = $('#save-ai');
+if (saveAi) saveAi.onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ aiChannelId: ($('#ai-ch') && $('#ai-ch').value.trim()) || '' }) });
+    toast('AI channel saved');
+  } catch (e) { toast(e.message); }
+};
+
+const saveLog = $('#save-log');
+if (saveLog) saveLog.onclick = async () => {
+  try {
+    await api('/api/admin/settings', { method: 'POST', body: JSON.stringify({ logChannelId: ($('#log-ch') && $('#log-ch').value.trim()) || '' }) });
+    toast('Log saved');
+  } catch (e) { toast(e.message); }
+};
+
+const doExport = $('#do-export');
+if (doExport) doExport.onclick = async () => {
+  try { await api('/api/admin/export', { method: 'POST', body: '{}' }); toast('Export sent'); }
+  catch (e) { toast(e.message); }
+};
+
+const doImport = $('#do-import');
+if (doImport) doImport.onclick = async () => {
+  try {
+    const r = await api('/api/admin/import', { method: 'POST', body: '{}' });
+    toast(r.ok ? 'Imported' : (r.reason || 'Done'));
+  } catch (e) { toast(e.message); }
+};
+
+const doAnn = $('#do-announce');
+if (doAnn) doAnn.onclick = async () => {
+  try {
+    await api('/api/admin/announce', {
+      method: 'POST',
+      body: JSON.stringify({
+        channelId: ($('#ann-ch') && $('#ann-ch').value.trim()) || '',
+        dashboardUrl: ($('#ann-url') && $('#ann-url').value.trim()) || '',
+        showPassword: !!( $('#ann-show-pw') && $('#ann-show-pw').checked )
+      })
+    });
+    toast('Message sent');
+  } catch (e) { toast(e.message); }
+};
+
+let botLogTimer = null;
+
+async function refreshBot() {
+  try {
+    const d = await api('/api/admin/bot');
+    const nameEl = $('#bot-name'); if (nameEl) nameEl.textContent = d.tag || d.name || '—';
+    const onEl = $('#bot-online');
+    if (onEl) {
+      const st = d.paused ? 'offline (stopped)' : (d.online ? 'online' : 'offline');
+      const color = (d.paused || !d.online) ? '#e74c3c' : '#2ecc71';
+      onEl.innerHTML = '<span style="color:' + color + '">●</span> ' + st + (d.status && !d.paused ? ' · presence ' + d.status : '');
+    }
+    const upEl = $('#bot-uptime'); if (upEl) upEl.textContent = d.uptimeText || ((d.uptime || 0) + 's');
+    const act = $('#bot-activity');
+    if (act && d.activity != null && document.activeElement !== act) act.value = d.activity || '';
+  } catch (e) { toast(e.message); }
+}
+
+async function refreshBotLogs() {
+  try {
+    const d = await api('/api/admin/bot/logs');
+    const term = $('#bot-terminal');
+    if (!term) return;
+    const lines = d.lines || [];
+    const atBottom = term.scrollHeight - term.scrollTop - term.clientHeight < 40;
+    term.textContent = lines.join(String.fromCharCode(10)) || '[no logs yet]';
+    const c = $('#bot-log-count'); if (c) c.textContent = lines.length + ' lines';
+    if (atBottom) term.scrollTop = term.scrollHeight;
+  } catch (e) {}
+}
+
+async function refreshGen() {
+  try {
+    const d = await api('/api/admin/gen');
+    const el = $('#gen-status'); if (el) el.textContent = JSON.stringify(d, null, 2);
+  } catch (e) {
+    const el = $('#gen-status'); if (el) el.textContent = e.message;
+  }
+}
+
+async function refreshPass() {
+  try {
+    const d = await api('/api/admin/pass');
+    const el = $('#pass-status'); if (el) el.textContent = JSON.stringify(d, null, 2);
+  } catch (e) {
+    const el = $('#pass-status'); if (el) el.textContent = e.message;
+  }
+}
+
+function startBotPolling() {
+  refreshBot();
+  refreshBotLogs();
+  if (botLogTimer) clearInterval(botLogTimer);
+  botLogTimer = setInterval(() => { refreshBot(); refreshBotLogs(); }, 2500);
+}
+
+function stopBotPolling() {
+  if (botLogTimer) { clearInterval(botLogTimer); botLogTimer = null; }
+}
+
+const _botStart = $('#bot-start');
+if (_botStart) _botStart.onclick = async () => {
+  try { await api('/api/admin/bot/start', { method: 'POST', body: '{}' }); toast('Started'); refreshBot(); refreshBotLogs(); }
+  catch (e) { toast(e.message); }
+};
+
+const _botStop = $('#bot-stop');
+if (_botStop) _botStop.onclick = async () => {
+  try { await api('/api/admin/bot/stop', { method: 'POST', body: '{}' }); toast('Stopped'); refreshBot(); refreshBotLogs(); }
+  catch (e) { toast(e.message); }
+};
+
+const _botRestart = $('#bot-restart');
+if (_botRestart) _botRestart.onclick = async () => {
+  try { await api('/api/admin/bot/restart', { method: 'POST', body: '{}' }); toast('Restarting…'); }
+  catch (e) { toast(e.message); }
+};
+
+document.querySelectorAll('[data-pstatus]').forEach((btn) => {
+  btn.onclick = async () => {
+    try {
+      const activity = ($('#bot-activity') && $('#bot-activity').value) || '';
+      await api('/api/admin/bot/presence', {
+        method: 'POST',
+        body: JSON.stringify({ status: btn.dataset.pstatus, activity })
+      });
+      toast('Presence: ' + btn.dataset.pstatus);
+      refreshBot();
+    } catch (e) { toast(e.message); }
+  };
+});
+
+const _saveP = $('#bot-save-presence');
+if (_saveP) _saveP.onclick = async () => {
+  try {
+    const activity = ($('#bot-activity') && $('#bot-activity').value) || '';
+    await api('/api/admin/bot/presence', {
+      method: 'POST',
+      body: JSON.stringify({ status: 'online', activity })
+    });
     toast('Status text saved');
     refreshBot();
-  }catch(e){toast(e.message)}
+  } catch (e) { toast(e.message); }
 };
-document.querySelectorAll('.nav button').forEach(btn=>{
-  btn.addEventListener('click',()=>{
-    if(btn.dataset.tab==='botctl') startBotPolling();
-    else stopBotPolling();
-    if(btn.dataset.tab==='gen')refreshGen();
-    if(btn.dataset.tab==='pass')refreshPass();
-  });
-});
-});
 
+if (localStorage.getItem(tokenKey)) showApp();
 </script>
 </body>
 </html>
