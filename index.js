@@ -119,12 +119,34 @@ async function onReady() {
       new SlashCommandBuilder().setName('access').setDescription('Gen access guide')
     ].map((c) => c.toJSON());
     const rest = new REST({ version: '10' }).setToken(env.TOKEN);
-    if (env.GUILD_ID) await rest.put(Routes.applicationGuildCommands(client.user.id, env.GUILD_ID), { body: cmds });
-    else await rest.put(Routes.applicationCommands(client.user.id), { body: cmds });
-    console.log('Slash commands registered:', cmds.map(c => c.name).join(', '));
+    const names = cmds.map((c) => c.name).join(', ');
+    let registered = false;
+
+    // Prefer guild (instant). Fall back to global if guild fails (Missing Access / wrong GUILD_ID).
+    if (env.GUILD_ID) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(client.user.id, env.GUILD_ID), { body: cmds });
+        console.log('Slash commands (guild ' + env.GUILD_ID + '):', names);
+        registered = true;
+      } catch (ge) {
+        console.error('Guild slash failed (' + ge.message + '). Falling back to GLOBAL…');
+        console.error('Fix: set correct GUILD_ID + re-invite bot with scope applications.commands');
+      }
+    }
+
+    if (!registered) {
+      await rest.put(Routes.applicationCommands(client.user.id), { body: cmds });
+      console.log('Slash commands (GLOBAL — may take up to 1 hour):', names);
+    }
   } catch (e) {
     console.error('Slash register failed:', e.message);
-    runtimeLog.error('Slash register: ' + e.message);
+    try { runtimeLog.error('Slash register: ' + e.message); } catch (_) {}
+    console.error(
+      'Invite URL needs scopes: bot applications.commands\n' +
+        'https://discord.com/api/oauth2/authorize?client_id=' +
+        (client.user && client.user.id) +
+        '&permissions=8&scope=bot%20applications.commands'
+    );
   }
 
   setInterval(async () => {
