@@ -19,9 +19,19 @@ body{
     radial-gradient(1200px 600px at 10% -10%, rgba(26,188,156,.18), transparent 55%),
     radial-gradient(900px 500px at 100% 0%, rgba(88,101,242,.12), transparent 50%),
     linear-gradient(160deg, rgba(8,10,14,.55) 0%, rgba(8,10,14,.35) 40%, rgba(8,10,14,.7) 100%),
-    url('/public/bg-desktop.jpg') center/cover fixed;
+    url('/public/bg-desktop.png') center/cover fixed, url('/public/bg-desktop.jpg') center/cover fixed;
 }
-@media (max-width:768px){ body{background-attachment:scroll} }
+@media (max-width:768px){
+  body{
+    background-attachment:scroll;
+    background-image:
+      radial-gradient(800px 400px at 10% -10%, rgba(26,188,156,.18), transparent 55%),
+      linear-gradient(160deg, rgba(8,10,14,.6), rgba(8,10,14,.75)),
+      url('/public/bg-mobile.png'), url('/public/bg-desktop.png');
+    background-size:cover;
+    background-position:center;
+  }
+}
 
 .glass{
   background:var(--panel);
@@ -171,6 +181,9 @@ textarea{min-height:90px;resize:vertical}
     </div>
     <nav class="nav">
       <button class="active" data-tab="overview">Overview</button>
+      <button data-tab="botctl">Bot control</button>
+      <button data-tab="gen">Gen stock</button>
+      <button data-tab="pass">Pass changer</button>
       <button data-tab="protection">Protection</button>
       <button data-tab="giveaways">Giveaways</button>
       <button data-tab="invites">Invites & Messages</button>
@@ -196,6 +209,32 @@ textarea{min-height:90px;resize:vertical}
       </div>
     </header>
     <div class="content">
+      
+      <section id="tab-botctl" class="hidden">
+        <div class="card glass">
+          <h2>Bot control</h2>
+          <p class="muted" style="margin-bottom:12px">Start · Stop · Restart (like a game panel). Restart exits the process — host must auto-restart.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <button class="btn btn-primary" id="bot-start" style="width:auto;background:#2ecc71;color:#041">Start</button>
+            <button class="btn" id="bot-stop" style="width:auto;background:#e74c3c;color:#fff;border:none">Stop</button>
+            <button class="btn" id="bot-restart" style="width:auto;background:#f39c12;color:#111;border:none">Restart</button>
+          </div>
+          <pre id="bot-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem">—</pre>
+        </div>
+      </section>
+      <section id="tab-gen" class="hidden">
+        <div class="card glass">
+          <h2>Gen stock</h2>
+          <pre id="gen-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem;white-space:pre-wrap">—</pre>
+        </div>
+      </section>
+      <section id="tab-pass" class="hidden">
+        <div class="card glass">
+          <h2>Pass changer</h2>
+          <pre id="pass-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem;white-space:pre-wrap">—</pre>
+        </div>
+      </section>
+
       <section id="tab-overview">
         <div class="grid">
           <div class="card glass"><div class="label">Bot</div><div class="value" id="st-tag">—</div><div class="hint" id="st-online">status</div></div>
@@ -373,7 +412,7 @@ function showApp(){$('#login-view').style.display='none';$('#app').classList.add
 function showLogin(){localStorage.removeItem(tokenKey);$('#app').classList.remove('open');$('#login-view').style.display='flex'}
 $('#login-btn').onclick=async()=>{
   $('#login-err').textContent='';
-  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value})});localStorage.setItem(tokenKey,d.token);showApp()}
+  try{const d=await api('/api/admin/login',{method:'POST',body:JSON.stringify({password:$('#pw').value,discordId:($('#discordId')&&$('#discordId').value)||''})});localStorage.setItem(tokenKey,d.token);showApp()}
   catch(e){$('#login-err').textContent=e.message||'Login failed'}
 };
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login-btn').click()});
@@ -433,6 +472,21 @@ $('#do-export').onclick=async()=>{try{await api('/api/admin/export',{method:'POS
 $('#do-import').onclick=async()=>{try{const r=await api('/api/admin/import',{method:'POST',body:'{}'});toast(r.ok?'Imported':r.reason)}catch(e){toast(e.message)}};
 $('#do-announce').onclick=async()=>{try{await api('/api/admin/announce',{method:'POST',body:JSON.stringify({channelId:$('#ann-ch').value.trim(),dashboardUrl:$('#ann-url').value.trim(),showPassword:$('#ann-show-pw').checked})});toast('Message sent')}catch(e){toast(e.message)}};
 if(localStorage.getItem(tokenKey))showApp();
+
+async function refreshBot(){try{const d=await api('/api/admin/bot');$('#bot-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#bot-status').textContent=e.message}}
+async function refreshGen(){try{const d=await api('/api/admin/gen');$('#gen-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#gen-status').textContent=e.message}}
+async function refreshPass(){try{const d=await api('/api/admin/pass');$('#pass-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#pass-status').textContent=e.message}}
+const _botStart=$('#bot-start');if(_botStart)_botStart.onclick=async()=>{try{await api('/api/admin/bot/start',{method:'POST',body:'{}'});toast('Bot started');refreshBot()}catch(e){toast(e.message)}};
+const _botStop=$('#bot-stop');if(_botStop)_botStop.onclick=async()=>{try{await api('/api/admin/bot/stop',{method:'POST',body:'{}'});toast('Bot stopped');refreshBot()}catch(e){toast(e.message)}};
+const _botRestart=$('#bot-restart');if(_botRestart)_botRestart.onclick=async()=>{try{await api('/api/admin/bot/restart',{method:'POST',body:'{}'});toast('Restarting…')}catch(e){toast(e.message)}};
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(btn.dataset.tab==='botctl')refreshBot();
+    if(btn.dataset.tab==='gen')refreshGen();
+    if(btn.dataset.tab==='pass')refreshPass();
+  });
+});
+
 </script>
 </body>
 </html>
