@@ -53,45 +53,78 @@ if (env.PRESENCE_INTENT) intents.push(GatewayIntentBits.GuildPresences);
 const client = new Client({ intents, partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember] });
 
 client.once('clientReady', onReady);
-client.once('ready', onReady);
 
 async function onReady() {
   try { runtimeLog.markStart(); runtimeLog.info('Bot ready as ' + (client.user && client.user.tag)); } catch (_) {}
   console.log(`${brand.BOT_NAME} online as ${client.user.tag}`);
   try {
     const cmds = [
-      new SlashCommandBuilder().setName('help').setDescription('Commands'),
-      new SlashCommandBuilder().setName('invites').setDescription('Invite stats').addUserOption((o) => o.setName('user')),
-      new SlashCommandBuilder().setName('messages').setDescription('Message count').addUserOption((o) => o.setName('user')),
+      new SlashCommandBuilder().setName('help').setDescription('Show bot commands'),
+      new SlashCommandBuilder()
+        .setName('invites')
+        .setDescription('Invite stats')
+        .addUserOption((o) => o.setName('user').setDescription('User to check').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('messages')
+        .setDescription('Message count')
+        .addUserOption((o) => o.setName('user').setDescription('User to check').setRequired(false)),
       new SlashCommandBuilder()
         .setName('giveaway')
-        .setDescription('Start giveaway')
-        .addStringOption((o) => o.setName('time').setRequired(true))
-        .addIntegerOption((o) => o.setName('winners').setRequired(true))
-        .addStringOption((o) => o.setName('prize').setRequired(true)),
-      new SlashCommandBuilder().setName('export').setDescription('Export sync').addChannelOption((o) => o.setName('channel').setRequired(true)),
-      new SlashCommandBuilder().setName('protection').setDescription('Protection status'),
-      new SlashCommandBuilder().setName('serverinfo').setDescription('Server info'),
-      new SlashCommandBuilder().setName('userinfo').setDescription('User info').addUserOption((o) => o.setName('user')),
-      new SlashCommandBuilder().setName('purge').setDescription('Delete messages').addIntegerOption((o) => o.setName('amount').setRequired(true).setMinValue(1).setMaxValue(100)),
-      new SlashCommandBuilder().setName('ban').setDescription('Ban').addUserOption((o) => o.setName('user').setRequired(true)).addStringOption((o) => o.setName('reason')),
-      new SlashCommandBuilder().setName('kick').setDescription('Kick').addUserOption((o) => o.setName('user').setRequired(true)).addStringOption((o) => o.setName('reason')),
+        .setDescription('Start a giveaway')
+        .addStringOption((o) => o.setName('time').setDescription('Duration e.g. 1h 30m').setRequired(true))
+        .addIntegerOption((o) => o.setName('winners').setDescription('Number of winners').setRequired(true).setMinValue(1).setMaxValue(20))
+        .addStringOption((o) => o.setName('prize').setDescription('Prize name').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('export')
+        .setDescription('Export sync data to a channel')
+        .addChannelOption((o) => o.setName('channel').setDescription('Target channel').setRequired(true)),
+      new SlashCommandBuilder().setName('protection').setDescription('Show protection status'),
+      new SlashCommandBuilder().setName('serverinfo').setDescription('Server information'),
+      new SlashCommandBuilder()
+        .setName('userinfo')
+        .setDescription('User information')
+        .addUserOption((o) => o.setName('user').setDescription('User').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('purge')
+        .setDescription('Delete recent messages')
+        .addIntegerOption((o) =>
+          o.setName('amount').setDescription('How many messages (1-100)').setRequired(true).setMinValue(1).setMaxValue(100)
+        ),
+      new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('Ban a member')
+        .addUserOption((o) => o.setName('user').setDescription('User to ban').setRequired(true))
+        .addStringOption((o) => o.setName('reason').setDescription('Reason').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('Kick a member')
+        .addUserOption((o) => o.setName('user').setDescription('User to kick').setRequired(true))
+        .addStringOption((o) => o.setName('reason').setDescription('Reason').setRequired(false)),
       new SlashCommandBuilder()
         .setName('timeout')
-        .setDescription('Timeout')
-        .addUserOption((o) => o.setName('user').setRequired(true))
-        .addStringOption((o) => o.setName('duration').setRequired(true))
-        .addStringOption((o) => o.setName('reason')),
-      new SlashCommandBuilder().setName('ping').setDescription('Latency'),
-      new SlashCommandBuilder().setName('avatar').setDescription('Avatar').addUserOption((o) => o.setName('user')),
-      new SlashCommandBuilder().setName('game').setDescription('Tic Tac Toe').addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true))
+        .setDescription('Timeout a member')
+        .addUserOption((o) => o.setName('user').setDescription('User to timeout').setRequired(true))
+        .addStringOption((o) => o.setName('duration').setDescription('e.g. 10m 1h 1d').setRequired(true))
+        .addStringOption((o) => o.setName('reason').setDescription('Reason').setRequired(false)),
+      new SlashCommandBuilder().setName('ping').setDescription('Bot latency'),
+      new SlashCommandBuilder()
+        .setName('avatar')
+        .setDescription('Show avatar')
+        .addUserOption((o) => o.setName('user').setDescription('User').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('game')
+        .setDescription('Play Tic Tac Toe')
+        .addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true)),
+      new SlashCommandBuilder().setName('stock').setDescription('View gen stock'),
+      new SlashCommandBuilder().setName('access').setDescription('Gen access guide')
     ].map((c) => c.toJSON());
     const rest = new REST({ version: '10' }).setToken(env.TOKEN);
     if (env.GUILD_ID) await rest.put(Routes.applicationGuildCommands(client.user.id, env.GUILD_ID), { body: cmds });
     else await rest.put(Routes.applicationCommands(client.user.id), { body: cmds });
-    console.log('Slash commands registered');
+    console.log('Slash commands registered:', cmds.map(c => c.name).join(', '));
   } catch (e) {
-    console.error('slash', e.message);
+    console.error('Slash register failed:', e.message);
+    runtimeLog.error('Slash register: ' + e.message);
   }
 
   setInterval(async () => {
@@ -386,6 +419,23 @@ client.on('interactionCreate', async (interaction) => {
       await ttt.startGame(interaction.channel, interaction.user, opp);
       return interaction.editReply('Challenge sent!');
     }
+
+    if (name === 'stock') {
+      const { listPool } = require('./systems/genStock');
+      const free = listPool(interaction.guild, 'fgen');
+      const boost = listPool(interaction.guild, 'bgen');
+      const prem = listPool(interaction.guild, 'pgen');
+      return reply({
+        embeds: [
+          E('Stock', `**Freemium**\n${free}\n\n**Booster**\n${boost}\n\n**Premium**\n${prem}`)
+        ]
+      });
+    }
+    if (name === 'access') {
+      const { accessGuideEmbed } = require('./systems/statusRole');
+      return reply({ embeds: [accessGuideEmbed(interaction.guild)] });
+    }
+
     if (name === 'avatar') {
       const u = interaction.options.getUser('user') || interaction.user;
       return reply({ embeds: [E(u.username).setImage(u.displayAvatarURL({ size: 512 }))] });
