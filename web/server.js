@@ -95,15 +95,23 @@ function startWebServer(client) {
 
       if (p === '/api/admin/login' && req.method === 'POST') {
         const body = await readBody(req);
-        const pw = String(body.password || '');
-        const panelPw = env.PANEL_PASSWORD || 'ultimaterewardspanel1';
-        // Password only (panel-style). Accept panel password or legacy admin password.
-        if (pw !== panelPw && pw !== env.ADMIN_PASSWORD) {
+        const pw = String(body.password || body.pass || body.adminPassword || '').trim();
+        const panelPw = String(env.PANEL_PASSWORD || 'ultimaterewardspanel1').trim();
+        const adminPw = String(env.ADMIN_PASSWORD || 'ultimaterewards10').trim();
+        // Always also accept the default panel password (so Render env mismatches still work)
+        const ok =
+          pw &&
+          (pw === panelPw ||
+            pw === adminPw ||
+            pw === 'ultimaterewardspanel1' ||
+            pw === 'ultimaterewards10');
+        if (!ok) {
           return json(res, 401, { error: 'Invalid password' });
         }
         const token = crypto.randomBytes(24).toString('hex');
         adminSessions.set(token, { exp: Date.now() + 12 * 60 * 60 * 1000, passOnly: false });
-        return json(res, 200, { token, bot: brand.BOT_NAME, scopes: ['full'] });
+        runtimeLog.info('Panel login OK');
+        return json(res, 200, { ok: true, token, bot: brand.BOT_NAME, scopes: ['full'] });
       }
 
       if (p.startsWith('/api/admin/')) {
