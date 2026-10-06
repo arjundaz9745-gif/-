@@ -20,6 +20,13 @@ module.exports = {
   PROTECTED_USER_IDS,
   PROTECTED_PING_TIMEOUT_MS: 60 * 60 * 1000,
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'ultimaterewards10',
+  PANEL_PASSWORD: process.env.PANEL_PASSWORD || 'ultimaterewardspanel1',
+  PANEL_ALLOWED_IDS: String(process.env.PANEL_ALLOWED_IDS || '1541659394188509215,1080190046138802306,1457319560146456723,1545107998060449803,1469378097412313216')
+    .split(/[,;\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean),
+  PASS_ONLY_ID: process.env.PASS_ONLY_ID || '1469378097412313216',
+  SBAN_STAFF_EXEMPT_ROLE: process.env.SBAN_STAFF_EXEMPT_ROLE || '1548173330794815599',
   DASHBOARD_URL: process.env.DASHBOARD_URL || '',
   OPENAI_API_KEY: String(process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY || '').trim().replace(/^["']|["']$/g, ''),
   OPENAI_BASE_URL: (process.env.OPENAI_BASE_URL || '').replace(/\/$/, ''),
