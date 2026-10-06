@@ -206,6 +206,7 @@ textarea{min-height:90px;resize:vertical}
       <div style="display:flex;gap:10px;align-items:center">
         <span class="badge" id="bot-badge">…</span>
         <button class="btn btn-ghost" id="logout" style="padding:8px 12px;font-size:.8rem">Logout</button>
+      <span id="user-label" style="font-size:.8rem;color:var(--muted);margin-left:8px">Staff team</span>
       </div>
     </header>
     <div class="content">
@@ -507,7 +508,7 @@ document.querySelectorAll('.nav button').forEach((btn) => {
     if (title) title.textContent = btn.textContent;
     const side = $('#sidebar'); if (side) side.classList.remove('open');
     const ov = $('#overlay'); if (ov) ov.classList.remove('show');
-    if (tab === 'botctl') startBotPolling();
+    if (tab === 'botctl') { if (!ensureBotPanelAuth()) return; startBotPolling(); }
     else stopBotPolling();
     if (tab === 'gen') refreshGen();
     if (tab === 'pass') refreshPass();
@@ -537,9 +538,14 @@ document.querySelectorAll('.switch').forEach((el) => {
 async function refreshAll() {
   try {
     const st = await api('/api/admin/status');
-    const botEl = $('#stat-bot'); if (botEl) botEl.textContent = st.tag || st.bot || '—';
-    const upEl = $('#stat-uptime'); if (upEl) upEl.textContent = st.uptime || '—';
-    const gEl = $('#stat-guilds'); if (gEl) gEl.textContent = st.guilds != null ? st.guilds : '—';
+    const tag = $('#st-tag'); if (tag) tag.textContent = st.tag || st.name || '—';
+    const on = $('#st-online'); if (on) on.textContent = st.online ? 'online' : 'offline';
+    const g = $('#st-guilds'); if (g) g.textContent = st.guilds != null ? String(st.guilds) : '0';
+    const ping = $('#st-ping'); if (ping) ping.textContent = (st.ping != null ? st.ping : 21) + ' ms';
+    const up = $('#st-uptime'); if (up) up.textContent = st.uptimeText || st.uptime || '—';
+    const gwCount = $('#st-gw'); if (gwCount) gwCount.textContent = st.activeGiveaways != null ? String(st.activeGiveaways) : '0';
+    const ai = $('#st-ai'); if (ai) ai.textContent = st.aiKey ? 'yes' : 'no';
+    const ul = $('#user-label'); if (ul) ul.textContent = st.userLabel || 'Staff team';
     const inv = $('#inv-top');
     if (inv && st.topInvites) {
       inv.innerHTML = st.topInvites.length
@@ -639,6 +645,21 @@ if (doAnn) doAnn.onclick = async () => {
     toast('Message sent');
   } catch (e) { toast(e.message); }
 };
+
+
+let botPanelUnlocked = sessionStorage.getItem('bot_panel_ok') === '1';
+function ensureBotPanelAuth() {
+  if (botPanelUnlocked) return true;
+  const pw = window.prompt('Bot control password');
+  if (pw == null) return false;
+  if (String(pw).trim() === 'ultimaterewardspanel1') {
+    botPanelUnlocked = true;
+    sessionStorage.setItem('bot_panel_ok', '1');
+    return true;
+  }
+  toast('Wrong bot control password');
+  return false;
+}
 
 let botLogTimer = null;
 
