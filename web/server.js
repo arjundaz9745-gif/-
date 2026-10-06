@@ -43,8 +43,14 @@ function json(res, code, obj) {
 }
 function requireAdmin(req) {
   const tok = req.headers['x-admin-token'] || '';
-  const exp = adminSessions.get(tok);
-  return !!(tok && exp && exp > Date.now());
+  const sess = adminSessions.get(tok);
+  if (!tok || !sess) return false;
+  const exp = typeof sess === 'number' ? sess : sess.exp;
+  return !!(exp && exp > Date.now());
+}
+function getSession(req) {
+  const tok = req.headers['x-admin-token'] || '';
+  return adminSessions.get(tok) || null;
 }
 function serveStatic(req, res, urlPath) {
   let rel = urlPath.replace(/^\/public\/?/, '') || 'index.html';
@@ -87,10 +93,26 @@ function startWebServer(client) {
 
       if (p === '/api/admin/login' && req.method === 'POST') {
         const body = await readBody(req);
-        if (String(body.password || '') !== env.ADMIN_PASSWORD) return json(res, 401, { error: 'Invalid password' });
+        const pw = String(body.password || '');
+        const discordId = String(body.discordId || body.userId || '').trim();
+        const panelPw = env.PANEL_PASSWORD || 'ultimaterewardspanel1';
+        const allowed = env.PANEL_ALLOWED_IDS || [];
+        // Accept panel password OR legacy admin password
+        const pwOk = pw === panelPw || pw === env.ADMIN_PASSWORD;
+        if (!pwOk) return json(res, 401, { error: 'Invalid password' });
+        if (!discordId || !allowed.includes(discordId)) {
+          return json(res, 403, { error: 'Discord ID not allowed on this panel' });
+        }
+        const passOnly = discordId === (env.PASS_ONLY_ID || '1469378097412313216');
         const token = crypto.randomBytes(24).toString('hex');
-        adminSessions.set(token, Date.now() + 12 * 60 * 60 * 1000);
-        return json(res, 200, { token, bot: brand.BOT_NAME });
+        adminSessions.set(token, { exp: Date.now() + 12 * 60 * 60 * 1000, discordId, passOnly });
+        return json(res, 200, {
+          token,
+          bot: brand.BOT_NAME,
+          discordId,
+          passOnly,
+          scopes: passOnly ? ['pass'] : ['full']
+        });
       }
 
       if (p.startsWith('/api/admin/')) {
@@ -182,6 +204,56 @@ function startWebServer(client) {
           if (!ch) return json(res, 400, { error: 'Channel not found' });
           return json(res, 200, await importFromChannel(ch));
         }
+
+        if (p === '/api/admin/bot' && req.method === 'GET') {
+          const sess = getSession(req);
+          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
+          return json(res, 200, {
+            paused: !!data.botPaused,
+            uptime: Math.floor(process.uptime()),
+            tag: client.user?.tag || null,
+            guilds: client.guilds?.cache?.size || 0
+          });
+        }
+        if (p === '/api/admin/bot/stop' && req.method === 'POST') {
+          const sess = getSession(req);
+          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
+          data.botPaused = true;
+          dataStore.save();
+          return json(res, 200, { ok: true, paused: true });
+        }
+        if (p === '/api/admin/bot/start' && req.method === 'POST') {
+          const sess = getSession(req);
+          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
+          data.botPaused = false;
+          dataStore.save();
+          return json(res, 200, { ok: true, paused: false });
+        }
+        if (p === '/api/admin/bot/restart' && req.method === 'POST') {
+          const sess = getSession(req);
+          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
+          data.botPaused = false;
+          dataStore.save();
+          setTimeout(() => process.exit(0), 800);
+          return json(res, 200, { ok: true, restarting: true });
+        }
+        if (p === '/api/admin/gen' && req.method === 'GET') {
+          const fgen = data.fgen || {};
+          const bgen = data.bgen || {};
+          const pgen = data.pgen || {};
+          const sum = (m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (v || []).length]));
+          return json(res, 200, { fgen: sum(fgen), bgen: sum(bgen), pgen: sum(pgen), config: data.genConfig || {} });
+        }
+        if (p === '/api/admin/pass' && req.method === 'GET') {
+          const pc = data.passChanger || { queue: [], history: [], stats: {} };
+          return json(res, 200, {
+            enabled: pc.enabled !== false,
+            queue: (pc.queue || []).slice(-50),
+            history: (pc.history || []).slice(-30),
+            stats: pc.stats || {}
+          });
+        }
+
         if (p === '/api/admin/announce' && req.method === 'POST') {
           const body = await readBody(req);
           if (!body.channelId) return json(res, 400, { error: 'channelId required' });
