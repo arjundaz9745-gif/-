@@ -8,6 +8,8 @@ const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const { inviteBreakdown } = require('../systems/invites');
 const { exportToChannel, importFromChannel } = require('../systems/sync');
+const runtimeLog = require('../systems/runtimeLog');
+const { ActivityType } = require('discord.js');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const MIME = {
@@ -195,34 +197,72 @@ function startWebServer(client) {
         }
 
         if (p === '/api/admin/bot' && req.method === 'GET') {
-          const sess = getSession(req);
-          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
+          const upMs = Date.now() - (runtimeLog.getStartedAt?.() || Date.now() - process.uptime() * 1000);
+          const upSec = Math.floor(process.uptime());
+          const fmt = (s) => {
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = s % 60;
+            return h + 'h ' + m + 'm ' + sec + 's';
+          };
+          const presence = data.botPresence || { status: 'online', activity: '' };
           return json(res, 200, {
-            paused: !!data.botPaused,
-            uptime: Math.floor(process.uptime()),
+            name: client.user?.username || null,
             tag: client.user?.tag || null,
-            guilds: client.guilds?.cache?.size || 0
+            id: client.user?.id || null,
+            online: !!client.user && !data.botPaused,
+            paused: !!data.botPaused,
+            status: data.botPaused ? 'offline' : (presence.status || 'online'),
+            activity: presence.activity || '',
+            uptime: upSec,
+            uptimeText: fmt(upSec),
+            guilds: client.guilds?.cache?.size || 0,
+            ping: client.ws?.ping ?? null
           });
         }
+        if (p === '/api/admin/bot/logs' && req.method === 'GET') {
+          return json(res, 200, { lines: runtimeLog.getLines(250) });
+        }
+        if (p === '/api/admin/bot/presence' && req.method === 'POST') {
+          const body = await readBody(req);
+          let status = String(body.status || 'online').toLowerCase();
+          if (!['online', 'idle', 'dnd', 'invisible'].includes(status)) status = 'online';
+          const activity = String(body.activity || body.text || '').slice(0, 128);
+          data.botPresence = { status, activity };
+          dataStore.save();
+          try {
+            const opts = { status };
+            if (activity) {
+              opts.activities = [{ name: activity, type: ActivityType.Custom, state: activity }];
+              // Custom may need type Watching as fallback on some clients
+              opts.activities = [{ name: activity, type: ActivityType.Watching }];
+            } else {
+              opts.activities = [];
+            }
+            await client.user.setPresence(opts);
+            runtimeLog.info('Presence set: ' + status + (activity ? ' | ' + activity : ''));
+          } catch (e) {
+            runtimeLog.error('Presence failed: ' + e.message);
+            return json(res, 500, { error: e.message });
+          }
+          return json(res, 200, { ok: true, status, activity });
+        }
         if (p === '/api/admin/bot/stop' && req.method === 'POST') {
-          const sess = getSession(req);
-          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
           data.botPaused = true;
           dataStore.save();
+          runtimeLog.warn('Panel: STOP — commands paused');
           return json(res, 200, { ok: true, paused: true });
         }
         if (p === '/api/admin/bot/start' && req.method === 'POST') {
-          const sess = getSession(req);
-          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
           data.botPaused = false;
           dataStore.save();
+          runtimeLog.info('Panel: START — bot accepting commands');
           return json(res, 200, { ok: true, paused: false });
         }
         if (p === '/api/admin/bot/restart' && req.method === 'POST') {
-          const sess = getSession(req);
-          if (sess && sess.passOnly) return json(res, 403, { error: 'Pass-only account' });
           data.botPaused = false;
           dataStore.save();
+          runtimeLog.warn('Panel: RESTART requested');
           setTimeout(() => process.exit(0), 800);
           return json(res, 200, { ok: true, restarting: true });
         }
