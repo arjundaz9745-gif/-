@@ -210,18 +210,47 @@ textarea{min-height:90px;resize:vertical}
     </header>
     <div class="content">
       
+      
       <section id="tab-botctl" class="hidden">
-        <div class="card glass">
-          <h2>Bot control</h2>
-          <p class="muted" style="margin-bottom:12px">Start · Stop · Restart (like a game panel). Restart exits the process — host must auto-restart.</p>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-            <button class="btn btn-primary" id="bot-start" style="width:auto;background:#2ecc71;color:#041">Start</button>
-            <button class="btn" id="bot-stop" style="width:auto;background:#e74c3c;color:#fff;border:none">Stop</button>
-            <button class="btn" id="bot-restart" style="width:auto;background:#f39c12;color:#111;border:none">Restart</button>
+        <div class="card glass" style="margin-bottom:14px">
+          <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between">
+            <div>
+              <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Name</div>
+              <div id="bot-name" style="font-size:1.15rem;font-weight:700">—</div>
+              <div style="margin-top:10px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Status</div>
+              <div id="bot-online" style="font-weight:600">—</div>
+              <div style="margin-top:10px;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Uptime</div>
+              <div id="bot-uptime" style="font-family:ui-monospace,monospace">—</div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="bot-start" style="width:auto;background:#2ecc71;color:#041;min-width:100px">Start</button>
+              <button class="btn" id="bot-stop" style="width:auto;background:#e74c3c;color:#fff;border:none;min-width:100px">Stop</button>
+              <button class="btn" id="bot-restart" style="width:auto;background:#f39c12;color:#111;border:none;min-width:100px">Restart</button>
+            </div>
           </div>
-          <pre id="bot-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem">—</pre>
+        </div>
+        <div class="card glass" style="margin-bottom:14px;padding:0;overflow:hidden">
+          <div style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.8rem;color:var(--muted);display:flex;justify-content:space-between">
+            <span>Console</span>
+            <span id="bot-log-count">0 lines</span>
+          </div>
+          <pre id="bot-terminal" style="margin:0;padding:12px 14px;height:320px;overflow:auto;background:#0a0c10;color:#b8f5c5;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.45;white-space:pre-wrap;word-break:break-word"></pre>
+        </div>
+        <div class="card glass">
+          <h2 style="margin-bottom:10px">Bot status</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button type="button" class="btn" data-pstatus="online" style="width:auto;background:#2ecc71;color:#041">Online</button>
+            <button type="button" class="btn" data-pstatus="idle" style="width:auto;background:#f1c40f;color:#111">Idle</button>
+            <button type="button" class="btn" data-pstatus="dnd" style="width:auto;background:#e74c3c;color:#fff;border:none">DND</button>
+            <button type="button" class="btn" data-pstatus="invisible" style="width:auto;background:#555;color:#fff;border:none">Invisible</button>
+          </div>
+          <h2 style="margin-bottom:8px;font-size:1rem">Bot settings</h2>
+          <label style="font-size:.72rem;color:var(--muted);text-transform:uppercase">Custom status / activity text</label>
+          <input id="bot-activity" type="text" maxlength="128" placeholder="Watching … / status text" style="width:100%;margin:8px 0 12px;padding:12px;border-radius:10px;border:1px solid var(--border);background:rgba(0,0,0,.25);color:var(--text)"/>
+          <button class="btn btn-primary" id="bot-save-presence" style="width:auto">Save presence</button>
         </div>
       </section>
+
       <section id="tab-gen" class="hidden">
         <div class="card glass">
           <h2>Gen stock</h2>
@@ -473,18 +502,71 @@ $('#do-import').onclick=async()=>{try{const r=await api('/api/admin/import',{met
 $('#do-announce').onclick=async()=>{try{await api('/api/admin/announce',{method:'POST',body:JSON.stringify({channelId:$('#ann-ch').value.trim(),dashboardUrl:$('#ann-url').value.trim(),showPassword:$('#ann-show-pw').checked})});toast('Message sent')}catch(e){toast(e.message)}};
 if(localStorage.getItem(tokenKey))showApp();
 
-async function refreshBot(){try{const d=await api('/api/admin/bot');$('#bot-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#bot-status').textContent=e.message}}
-async function refreshGen(){try{const d=await api('/api/admin/gen');$('#gen-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#gen-status').textContent=e.message}}
-async function refreshPass(){try{const d=await api('/api/admin/pass');$('#pass-status').textContent=JSON.stringify(d,null,2)}catch(e){$('#pass-status').textContent=e.message}}
-const _botStart=$('#bot-start');if(_botStart)_botStart.onclick=async()=>{try{await api('/api/admin/bot/start',{method:'POST',body:'{}'});toast('Bot started');refreshBot()}catch(e){toast(e.message)}};
-const _botStop=$('#bot-stop');if(_botStop)_botStop.onclick=async()=>{try{await api('/api/admin/bot/stop',{method:'POST',body:'{}'});toast('Bot stopped');refreshBot()}catch(e){toast(e.message)}};
+let botLogTimer=null;
+async function refreshBot(){
+  try{
+    const d=await api('/api/admin/bot');
+    const nameEl=$('#bot-name'); if(nameEl) nameEl.textContent=d.tag||d.name||'—';
+    const onEl=$('#bot-online');
+    if(onEl){
+      const st=d.paused?'offline (stopped)':(d.online?'online':'offline');
+      onEl.innerHTML='<span style="color:'+(d.paused||!d.online?'#e74c3c':'#2ecc71')+'">●</span> '+st+(d.status&&!d.paused?' · presence '+d.status:'');
+    }
+    const upEl=$('#bot-uptime'); if(upEl) upEl.textContent=d.uptimeText||(d.uptime+'s');
+    const act=$('#bot-activity'); if(act && d.activity!=null && document.activeElement!==act) act.value=d.activity||'';
+  }catch(e){ toast(e.message); }
+}
+async function refreshBotLogs(){
+  try{
+    const d=await api('/api/admin/bot/logs');
+    const term=$('#bot-terminal');
+    if(!term) return;
+    const lines=d.lines||[];
+    const atBottom=term.scrollHeight-term.scrollTop-term.clientHeight<40;
+    term.textContent=lines.join('
+')||'[no logs yet]';
+    const c=$('#bot-log-count'); if(c) c.textContent=lines.length+' lines';
+    if(atBottom) term.scrollTop=term.scrollHeight;
+  }catch(e){}
+}
+async function refreshGen(){try{const d=await api('/api/admin/gen');const el=$('#gen-status');if(el)el.textContent=JSON.stringify(d,null,2)}catch(e){const el=$('#gen-status');if(el)el.textContent=e.message}}
+async function refreshPass(){try{const d=await api('/api/admin/pass');const el=$('#pass-status');if(el)el.textContent=JSON.stringify(d,null,2)}catch(e){const el=$('#pass-status');if(el)el.textContent=e.message}}
+function startBotPolling(){
+  refreshBot(); refreshBotLogs();
+  if(botLogTimer) clearInterval(botLogTimer);
+  botLogTimer=setInterval(()=>{refreshBot();refreshBotLogs()},2500);
+}
+function stopBotPolling(){ if(botLogTimer){clearInterval(botLogTimer);botLogTimer=null} }
+const _botStart=$('#bot-start');if(_botStart)_botStart.onclick=async()=>{try{await api('/api/admin/bot/start',{method:'POST',body:'{}'});toast('Started');refreshBot();refreshBotLogs()}catch(e){toast(e.message)}};
+const _botStop=$('#bot-stop');if(_botStop)_botStop.onclick=async()=>{try{await api('/api/admin/bot/stop',{method:'POST',body:'{}'});toast('Stopped');refreshBot();refreshBotLogs()}catch(e){toast(e.message)}};
 const _botRestart=$('#bot-restart');if(_botRestart)_botRestart.onclick=async()=>{try{await api('/api/admin/bot/restart',{method:'POST',body:'{}'});toast('Restarting…')}catch(e){toast(e.message)}};
+document.querySelectorAll('[data-pstatus]').forEach(btn=>{
+  btn.onclick=async()=>{
+    try{
+      const activity=($('#bot-activity')&&$('#bot-activity').value)||'';
+      await api('/api/admin/bot/presence',{method:'POST',body:JSON.stringify({status:btn.dataset.pstatus,activity})});
+      toast('Presence: '+btn.dataset.pstatus);
+      refreshBot();
+    }catch(e){toast(e.message)}
+  };
+});
+const _saveP=$('#bot-save-presence');
+if(_saveP)_saveP.onclick=async()=>{
+  try{
+    const activity=($('#bot-activity')&&$('#bot-activity').value)||'';
+    await api('/api/admin/bot/presence',{method:'POST',body:JSON.stringify({status:'online',activity})});
+    toast('Status text saved');
+    refreshBot();
+  }catch(e){toast(e.message)}
+};
 document.querySelectorAll('.nav button').forEach(btn=>{
   btn.addEventListener('click',()=>{
-    if(btn.dataset.tab==='botctl')refreshBot();
+    if(btn.dataset.tab==='botctl') startBotPolling();
+    else stopBotPolling();
     if(btn.dataset.tab==='gen')refreshGen();
     if(btn.dataset.tab==='pass')refreshPass();
   });
+});
 });
 
 </script>
