@@ -20,7 +20,7 @@ const { handleMentions } = require('./systems/pingProtect');
 const { askAI } = require('./systems/ai');
 const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
-const { handlePassMessage } = require('./systems/passChanger');
+const { handlePassMessage, handleCheckButton } = require('./systems/passChanger');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
@@ -333,6 +333,10 @@ client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isButton() && interaction.customId.startsWith('ttt:')) {
       await ttt.handleButton(interaction);
+      return;
+    }
+    if (interaction.isButton() && interaction.customId.startsWith('mcheck:')) {
+      await handleCheckButton(interaction);
       return;
     }
     if (interaction.isButton() && interaction.customId === 'gw_enter') {
