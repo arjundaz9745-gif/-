@@ -137,7 +137,7 @@ function accessGuideEmbed(guild) {
     .setTitle(`${hashtag} ACCESS GUIDE`)
     .setDescription(body)
     .setColor(0x0d1117)
-    .setFooter({ text: 'FlareCloud · Access Guide' });
+    .setFooter({ text: 'Ultimate Rewards · Access Guide' });
 }
 
 function tutorialEmbed(key) {

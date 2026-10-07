@@ -7,7 +7,7 @@ const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 const { isStaff } = require('../utils/staff');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { checkMicrosoft } = require('./msCheck');
 
 function getPassData() {
@@ -83,7 +83,7 @@ async function handlePassMessage(message, client) {
   const rest = raw.slice(1).trim();
   const args = rest.split(/\s+/);
   const cmd = (args.shift() || '').toLowerCase();
-  if (!['pass', 'passchange', 'changepass', 'pc', 'check', 'mscheck', 'chk', 'checkproxy', 'proxy'].includes(cmd)) {
+  if (!['pass', 'passchange', 'changepass', 'pc'].includes(cmd)) {
     return false;
   }
 
@@ -99,70 +99,124 @@ async function handlePassMessage(message, client) {
     return true;
   }
 
-  // ── CHECK ──
-  if (['check', 'mscheck', 'chk'].includes(cmd)) {
+  // ── CHECK (auto + half-manual buttons) ──
+  if (['check', 'mscheck', 'chk', 'mcheck'].includes(cmd)) {
     const rawCred = args[0] || '';
     if (!rawCred.includes(':')) {
       await message.reply(
-        '**Microsoft checker**\n`' +
-          prefix +
-          'check email:password`\nExample: `' +
-          prefix +
-          'check user@outlook.com:MyPass123`'
+        '**Microsoft checker**\n' +
+          '`' + prefix + 'check email:password` — try auto, then staff buttons if needed\n' +
+          '`' + prefix + 'mcheck email:password` — staff buttons only (no proxy)\n\n' +
+          'Staff clicks: **Login OK** · **Wrong pass** · **No email** · **Not loginable**'
       );
       return true;
     }
     const colon = rawCred.indexOf(':');
     const email = rawCred.slice(0, colon).trim();
     const password = rawCred.slice(colon + 1);
-    const wait = await message.reply({
-      embeds: [E('Checking…', 'Probing Microsoft login for `' + email + '`…', brand.blurple)]
-    });
-    let result;
-    try {
-      result = await checkMicrosoft(email, password);
-    } catch (e) {
-      result = { ok: false, summary: e.message, error: e.message, details: {} };
-    }
-    const color = result.ok ? brand.green : brand.red;
-    const title = result.ok ? 'Microsoft check · OK' : 'Microsoft check · Problem';
-    let desc;
-    if (result.ok) {
-      desc = '**Status:** Login looks good\n**Account:** `' + email + '`';
-    } else {
-      const errText = String(result.error || result.summary || 'Unknown error').slice(0, 900);
-      desc =
-        '**Status:** Login problem\n**Account:** `' +
-        email +
-        '`\n\n**Error (copy-paste):**\n```\n' +
-        errText +
-        '\n```';
-    }
-    const d = result.details || {};
-    if (d.exists) {
-      if (d.exists.exists === false) desc += "\n\n_Existence:_ account not found";
-      else if (d.exists.exists === true) {
-        desc += '\n\n_Existence:_ account found';
-        if (d.exists.hasPassword === true) desc += ' (password login available)';
-        if (d.exists.hasPassword === false) desc += ' (no password / code only)';
-        if (d.exists.preferOther) desc += ' (other-ways preferred, password still tried)';
+    const manualOnly = cmd === 'mcheck';
+
+    // Optional quick auto (skip if mcheck)
+    let auto = null;
+    if (!manualOnly) {
+      const wait = await message.reply({
+        embeds: [E('Checking…', 'Auto-check `' + email + '`…', brand.blurple)]
+      });
+      try {
+        auto = await checkMicrosoft(email, password);
+      } catch (e) {
+        auto = { ok: false, summary: e.message, error: e.message };
       }
-    }
-    if (d.steps && d.steps.length) {
-      const last = d.steps[d.steps.length - 1];
-      if (last && last.raw) desc += '\n_MS raw:_ ' + String(last.raw).slice(0, 120);
+      // Definitive auto results — no need for manual
+      const err = String(auto.error || auto.summary || '');
+      const definitive =
+        auto.ok === true ||
+        err === "This Email doesn't exist" ||
+        err === 'Not loginable' ||
+        err === 'password was changed by original user' ||
+        err === 'Login OK';
+      if (definitive && (auto.ok || ["This Email doesn't exist", 'Not loginable', 'password was changed by original user'].includes(err))) {
+        const color = auto.ok ? brand.green : brand.red;
+        const title = auto.ok ? 'Microsoft check · OK' : 'Microsoft check · Problem';
+        const desc = auto.ok
+          ? '**Status:** Login OK\n**Account:** `' + email + '`'
+          : '**Status:** ' + err + '\n**Account:** `' + email + '`\n\n```\n' + err + '\n```';
+        try {
+          await wait.edit({ embeds: [E(title, desc, color)] });
+        } catch (_) {
+          await message.reply({ embeds: [E(title, desc, color)] });
+        }
+        if (!auto.ok) {
+          await message.channel.send('```\n' + err + '\n```').catch(() => {});
+        }
+        return true;
+      }
+      try {
+        await wait.edit({
+          embeds: [
+            E(
+              'Auto-check inconclusive',
+              'Could not finish auto check (proxy/Microsoft block).\nSwitching to **staff manual** below.',
+              brand.gold
+            )
+          ]
+        });
+      } catch (_) {}
     }
 
-    try {
-      await wait.edit({ embeds: [E(title, desc, color)] });
-    } catch (_) {
-      await message.reply({ embeds: [E(title, desc, color)] });
+    // Half-manual: staff verifies in browser and clicks a button
+    const id = 'mc_' + Date.now().toString(36) + '_' + message.author.id.slice(-4);
+    const data = dataStore.get();
+    if (!data.manualChecks) data.manualChecks = {};
+    data.manualChecks[id] = {
+      email,
+      password,
+      userId: message.author.id,
+      channelId: message.channel.id,
+      guildId: message.guild.id,
+      createdAt: Date.now()
+    };
+    // prune old (>2h)
+    for (const [k, v] of Object.entries(data.manualChecks)) {
+      if (Date.now() - (v.createdAt || 0) > 2 * 60 * 60 * 1000) delete data.manualChecks[k];
     }
-    if (!result.ok && result.error) {
-      await message.channel
-        .send('```\n' + String(result.error).slice(0, 1500) + '\n```')
-        .catch(() => {});
-    }
+    dataStore.save();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('mcheck:ok:' + id).setLabel('Login OK').setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('mcheck:pass:' + id)
+        .setLabel('Wrong password')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('mcheck:email:' + id)
+        .setLabel("Email doesn't exist")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('mcheck:nol:' + id)
+        .setLabel('Not loginable')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    const guide =
+      '**Half-manual check**\n' +
+      '1. Open https://login.live.com in your browser\n' +
+      '2. Sign in with the account below\n' +
+      '3. Click the button that matches what Microsoft shows\n\n' +
+      '**Email**\n```\n' +
+      email +
+      '\n```\n' +
+      '**Password**\n||```' +
+      password +
+      '```||\n\n' +
+      '_Requested by <@' +
+      message.author.id +
+      '>_';
+
+    await message.reply({
+      embeds: [E('Microsoft check · Staff', guide, brand.blurple)],
+      components: [row]
+    });
     return true;
   }
 
@@ -298,4 +352,87 @@ function getPassStats() {
   return getPassData();
 }
 
-module.exports = { handlePassMessage, getPassData, getPassStats, completeJob };
+const CHECK_LABELS = {
+  ok: 'Login OK',
+  pass: 'password was changed by original user',
+  email: "This Email doesn't exist",
+  nol: 'Not loginable'
+};
+
+async function handleCheckButton(interaction) {
+  if (!interaction.customId.startsWith('mcheck:')) return false;
+  const parts = interaction.customId.split(':');
+  // mcheck:ok:id
+  if (parts.length < 3) return false;
+  const kind = parts[1];
+  const id = parts.slice(2).join(':');
+  const label = CHECK_LABELS[kind];
+  if (!label) return false;
+
+  // Staff only
+  const member = interaction.member;
+  if (!staffOk(member)) {
+    await interaction.reply({ content: 'Staff only.', ephemeral: true });
+    return true;
+  }
+
+  const data = dataStore.get();
+  const job = data.manualChecks?.[id];
+  if (!job) {
+    await interaction.reply({ content: 'This check expired. Run the command again.', ephemeral: true });
+    return true;
+  }
+
+  const email = job.email;
+  const ok = kind === 'ok';
+  const color = ok ? brand.green : brand.red;
+  const title = ok ? 'Microsoft check · OK' : 'Microsoft check · Problem';
+  const desc =
+    '**Status:** ' +
+    label +
+    '\n**Account:** `' +
+    email +
+    '`\n**By:** <@' +
+    interaction.user.id +
+    '>\n\n```\n' +
+    label +
+    '\n```';
+
+  delete data.manualChecks[id];
+  dataStore.save();
+
+  await interaction.update({
+    embeds: [E(title, desc, color)],
+    components: []
+  });
+
+  // Public copy-paste line
+  if (!ok) {
+    await interaction.followUp({ content: '```\n' + label + '\n```' }).catch(() => {});
+  }
+
+  // DM requester
+  try {
+    const u = await interaction.client.users.fetch(job.userId);
+    await u.send({
+      embeds: [
+        E(
+          title,
+          '**Account:** `' + email + '`\n**Result:** ' + label + '\n**Staff:** ' + interaction.user.tag,
+          color
+        )
+      ]
+    });
+  } catch (_) {}
+
+  return true;
+}
+
+module.exports = {
+  handlePassMessage,
+  handleCheckButton,
+  getPassData,
+  getPassStats,
+  completeJob
+};
+

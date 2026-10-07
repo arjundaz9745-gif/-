@@ -47,7 +47,7 @@ function stockEmbed(guild, title) {
   const boost = listPool(guild, 'bgen');
   const prem = listPool(guild, 'pgen');
   return new EmbedBuilder()
-    .setTitle(title || 'FlareCloud Inventory')
+    .setTitle(title || 'Ultimate Rewards · Gen Stock')
     .setColor(0x001000)
     .setDescription('```Active inventory stock```')
     .addFields(
@@ -226,7 +226,7 @@ async function handleGenMessage(message, client) {
           value: `Please vouch: \`Legit got ${PRODUCT_KEYS[key]?.label || key} by <@${vouchId}>\` in ${vouchCh}`
         }
       )
-      .setFooter({ text: 'FlareCloud Gen' });
+      .setFooter({ text: 'Ultimate Rewards Gen' });
 
     try {
       await message.author.send({ embeds: [dm] });
