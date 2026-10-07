@@ -11,7 +11,7 @@ const { buildInviteEmbed, ensureInviteStats, inviteBreakdown } = require('../sys
 const { exportToChannel, importFromChannel, scheduleExport } = require('../systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('../systems/giveaways');
 const { addMapping, removeMapping, listForMessage } = require('../systems/reactionRoles');
-const { formatStockList, formatMethodList, STOCK_META, METHOD_META } = require('../systems/stocks');
+const { formatStockList, formatMethodList, STOCK_META, METHOD_META, em, brandEmojis, takePaidStock } = require('../systems/stocks');
 const { botLog } = require('../systems/logger');
 const { accessGuideEmbed } = require('../systems/statusRole');
 const { addSban, removeSban, isTimeoutExempt, isSbanActive } = require('../systems/sban');
@@ -39,6 +39,46 @@ async function handleCommand(message, client) {
     }
     return true;
   };
+
+
+  // ── Paid stock: -mcfa / -netflix / -fa … ──
+  {
+    const aliases = { xboxcode: 'xbox_code' };
+    const key = aliases[cmd] || cmd;
+    const reserved = new Set([
+      'help','commands','stock','stockadd','stocktake','stockget','i','invites','inv','pass','check','mcheck',
+      'bot','panel','dashboard','sban','unsban','access','genhelp','fgen','bgen','pgen','cstatus','addinvite',
+      'ainv','rmi','m','messages','lb','rank','level','ban','kick','timeout','mute','purge','clear','ping'
+    ]);
+    if (!reserved.has(cmd) && (STOCK_META[key] || (data.stocks && Object.prototype.hasOwnProperty.call(data.stocks, key)))) {
+      if (!needStaff()) return true;
+      const item = takePaidStock(data, key);
+      dataStore.save();
+      const b = brandEmojis(message.guild);
+      const meta = STOCK_META[key] || { emoji: 'stock', label: key, fallback: '📦' };
+      const icon = em(message.guild, meta.emoji, meta.fallback);
+      if (!item) {
+        await message.reply({
+          embeds: [
+            E(
+              'Out of stock',
+              `${icon} **${meta.label}** is empty.\nStaff: \`-stockadd ${key} email:pass\``,
+              brand.red
+            )
+          ]
+        });
+        return true;
+      }
+      const left = (data.stocks[key] || []).length;
+      const body =
+        `${b.ur} **Ultimate Rewards** ${b.dm}\n` +
+        `${icon} **Here is the FA** · **${meta.label}**\n\n` +
+        `||${item}||\n\n` +
+        `${em(message.guild, 'verified', '✅')} Delivered · left **${left}**`;
+      await message.reply({ embeds: [E(`${icon} ${meta.label}`, body, brand.green)] });
+      return true;
+    }
+  }
 
   // ── HELP ──
     if (cmd === 'help' || cmd === 'commands') {
@@ -753,7 +793,7 @@ async function handleCommand(message, client) {
   }
 
   if (cmd === 'stock') {
-    await message.reply({ embeds: [E('📦 Stocks', formatStockList(data))] });
+    await message.reply({ embeds: [E('Ultimate Rewards · Stock', formatStockList(data, message.guild))] });
     return true;
   }
   if (cmd === 'stockadd') {
@@ -784,7 +824,18 @@ async function handleCommand(message, client) {
     const item = data.stocks[name].shift();
     dataStore.save();
     scheduleExport(client, 'stock');
-    await message.reply({ embeds: [E('Stock out', `**${name}**\n||${item}||\nLeft: **${data.stocks[name].length}**`, brand.green)] });
+    const b = brandEmojis(message.guild);
+    const meta = STOCK_META[name] || { emoji: 'stock', label: name, fallback: '📦' };
+    const icon = em(message.guild, meta.emoji, meta.fallback);
+    await message.reply({
+      embeds: [
+        E(
+          icon + ' ' + (meta.label || name),
+          `${b.ur} **Ultimate Rewards** ${b.dm}\n${icon} **Here is the FA**\n\n||${item}||\n\nLeft: **${data.stocks[name].length}**`,
+          brand.green
+        )
+      ]
+    });
     return true;
   }
   if (cmd === 'methods' || cmd === 'method') {
