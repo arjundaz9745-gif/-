@@ -1,11 +1,12 @@
 /**
  * Server backup / restore (anti-raid)
  *
- * -backup <name>              Save cats, channels, roles, members, messages
- * -backup list | load | delete
- * -backuplogs #channel        Auto-post backup JSON here after save
+ * -backup <name> | list | load | delete
+ * -backuplogs #channel
  *
- * Discord cannot force-add members. Load unbans + reapplies roles on rejoin.
+ * LOAD: deletes channels/categories/roles (safe set) → recreates from backup
+ * Messages restored via webhook (looks like original user, not "User: text")
+ * Members: unban + roles on rejoin (Discord cannot force-add users)
  */
 const fs = require('fs');
 const path = require('path');
@@ -26,57 +27,47 @@ const MAX_NAME_LEN = 32;
 function ensureDir() {
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
-
 function safeName(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, MAX_NAME_LEN);
+  return String(name || '').toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, MAX_NAME_LEN);
 }
-
 function backupPath(name) {
   return path.join(BACKUP_DIR, `${safeName(name)}.json`);
 }
-
 function getBackupLogsChannelId() {
   const d = dataStore.get();
   return d.backupLogsChannelId || process.env.BACKUP_LOGS_CHANNEL || null;
 }
-
 function setBackupLogsChannelId(id) {
   const d = dataStore.get();
   d.backupLogsChannelId = id;
   dataStore.save();
 }
-
 function getPendingMembers() {
   const d = dataStore.get();
   if (!d.backupPendingMembers) d.backupPendingMembers = {};
   return d.backupPendingMembers;
 }
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 function listBackups() {
   ensureDir();
-  return fs
-    .readdirSync(BACKUP_DIR)
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => {
-      try {
-        const j = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, f), 'utf8'));
-        return {
-          name: j.name || f.replace(/\.json$/, ''),
-          at: j.createdAt,
-          channels: (j.channels || []).length,
-          categories: (j.categories || []).length,
-          roles: (j.roles || []).length,
-          members: (j.members || []).length
-        };
-      } catch {
-        return { name: f.replace(/\.json$/, ''), at: null, channels: 0, categories: 0, roles: 0, members: 0 };
-      }
-    })
-    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith('.json')).map((f) => {
+    try {
+      const j = JSON.parse(fs.readFileSync(path.join(BACKUP_DIR, f), 'utf8'));
+      return {
+        name: j.name || f.replace(/\.json$/, ''),
+        at: j.createdAt,
+        channels: (j.channels || []).length,
+        categories: (j.categories || []).length,
+        roles: (j.roles || []).length,
+        members: (j.members || []).length
+      };
+    } catch {
+      return { name: f.replace(/\.json$/, ''), at: null, channels: 0, categories: 0, roles: 0, members: 0 };
+    }
+  }).sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
 }
 
 async function fetchRecentMessages(channel, limit) {
@@ -87,10 +78,13 @@ async function fetchRecentMessages(channel, limit) {
       .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
       .map((m) => ({
         authorTag: m.author?.tag || 'unknown',
+        authorName: m.member?.displayName || m.author?.username || 'user',
         authorId: m.author?.id,
-        content: (m.content || '').slice(0, 1900),
+        avatarURL: m.author?.displayAvatarURL?.({ size: 128 }) || null,
+        content: (m.content || '').slice(0, 2000),
         attachments: [...(m.attachments?.values?.() || [])].map((a) => ({ name: a.name, url: a.url })),
-        createdAt: m.createdAt?.toISOString?.() || null
+        createdAt: m.createdAt?.toISOString?.() || null,
+        bot: !!m.author?.bot
       }));
   } catch {
     return [];
@@ -111,11 +105,7 @@ async function createBackup(guild, name) {
       categories.push({ id: ch.id, name: ch.name, position: ch.position ?? 0 });
       continue;
     }
-    if (
-      ch.type === ChannelType.PublicThread ||
-      ch.type === ChannelType.PrivateThread ||
-      ch.type === ChannelType.AnnouncementThread
-    ) continue;
+    if ([ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread].includes(ch.type)) continue;
 
     const base = {
       id: ch.id,
@@ -147,11 +137,8 @@ async function createBackup(guild, name) {
       position: r.position
     }));
 
-  let members = [];
-  try {
-    await guild.members.fetch();
-  } catch (_) {}
-  members = [...guild.members.cache.values()]
+  try { await guild.members.fetch(); } catch (_) {}
+  const members = [...guild.members.cache.values()]
     .filter((m) => !m.user.bot)
     .map((m) => ({
       id: m.id,
@@ -181,49 +168,146 @@ function loadBackupFile(name) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
-async function restoreBackup(guild, name, progress) {
+async function wipeGuildStructure(guild, keepChannelId, log) {
+  // Delete non-category channels first (except keepChannelId)
+  const channels = [...guild.channels.cache.values()]
+    .filter((ch) => ch.type !== ChannelType.GuildCategory)
+    .filter((ch) => ch.id !== keepChannelId)
+    .filter((ch) => ![ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.AnnouncementThread].includes(ch.type));
+
+  await log(`🗑️ Removing **${channels.length}** channels…`);
+  for (const ch of channels) {
+    try {
+      await ch.delete('Backup restore wipe');
+      await sleep(300);
+    } catch (e) {
+      await log(`⚠️ Delete channel ${ch.name}: ${e.message}`);
+    }
+  }
+
+  const cats = [...guild.channels.cache.values()].filter((ch) => ch.type === ChannelType.GuildCategory);
+  await log(`🗑️ Removing **${cats.length}** categories…`);
+  for (const ch of cats) {
+    try {
+      await ch.delete('Backup restore wipe');
+      await sleep(300);
+    } catch (e) {
+      await log(`⚠️ Delete category ${ch.name}: ${e.message}`);
+    }
+  }
+
+  // Roles below bot, not managed, not @everyone
+  const me = guild.members.me;
+  const myPos = me?.roles?.highest?.position ?? 0;
+  const roles = [...guild.roles.cache.values()]
+    .filter((r) => r.id !== guild.id && !r.managed && r.position < myPos && r.editable);
+  await log(`🗑️ Removing **${roles.length}** roles…`);
+  for (const r of roles.sort((a, b) => a.position - b.position)) {
+    try {
+      await r.delete('Backup restore wipe');
+      await sleep(300);
+    } catch (e) {
+      await log(`⚠️ Delete role ${r.name}: ${e.message}`);
+    }
+  }
+}
+
+async function sendAsUser(channel, msg) {
+  // Webhook so it looks like the original member, not "User: message"
+  let hook;
+  try {
+    const hooks = await channel.fetchWebhooks().catch(() => null);
+    hook = hooks?.find((h) => h.name === 'DashMod Backup') || null;
+    if (!hook) {
+      hook = await channel.createWebhook({
+        name: 'DashMod Backup',
+        reason: 'Backup message restore'
+      });
+    }
+  } catch {
+    hook = null;
+  }
+
+  const content = (msg.content || '').slice(0, 2000);
+  const files = (msg.attachments || []).slice(0, 5).map((a) => a.url).filter(Boolean);
+  const username = (msg.authorName || msg.authorTag || 'Member').slice(0, 80);
+  const avatarURL = msg.avatarURL || undefined;
+
+  if (hook) {
+    try {
+      await hook.send({
+        content: content || (files.length ? undefined : '.'),
+        username,
+        avatarURL,
+        files: files.length ? files : undefined
+      });
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Fallback if webhook fails
+  try {
+    await channel.send({
+      content: content || (files.length ? files.join('\n') : undefined)
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function restoreBackup(guild, name, progress, keepChannelId) {
   const data = loadBackupFile(name);
   if (!data) throw new Error('Backup not found: ' + name);
   const log = async (t) => { if (progress) await progress(t).catch(() => {}); };
 
-  await log(`👑 Restoring **${(data.roles || []).length}** roles…`);
+  // 1) Wipe
+  await wipeGuildStructure(guild, keepChannelId, log);
+  await sleep(1000);
+
+  // 2) Roles (lowest first so hierarchy can be adjusted later)
+  await log(`👑 Creating **${(data.roles || []).length}** roles…`);
   const roleByName = new Map();
-  for (const r of data.roles || []) {
-    let existing = guild.roles.cache.find((x) => x.name === r.name && !x.managed);
-    if (!existing) {
-      try {
-        existing = await guild.roles.create({
-          name: r.name,
-          hoist: !!r.hoist,
-          mentionable: !!r.mentionable,
-          permissions: BigInt(r.permissions || 0),
-          reason: `Backup restore: ${data.name}`
-        });
-      } catch (e) {
-        await log(`⚠️ Role \`${r.name}\`: ${e.message}`);
-        continue;
-      }
+  const rolesAsc = [...(data.roles || [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  for (const r of rolesAsc) {
+    try {
+      const created = await guild.roles.create({
+        name: r.name,
+        hoist: !!r.hoist,
+        mentionable: !!r.mentionable,
+        permissions: BigInt(r.permissions || 0),
+        reason: `Backup restore: ${data.name}`
+      });
+      roleByName.set(r.name, created);
+      await sleep(350);
+    } catch (e) {
+      await log(`⚠️ Role \`${r.name}\`: ${e.message}`);
     }
-    roleByName.set(r.name, existing);
   }
 
+  // 3) Categories
   const catMap = new Map();
   const cats = [...(data.categories || [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  await log(`📁 Restoring **${cats.length}** categories…`);
+  await log(`📁 Creating **${cats.length}** categories…`);
   for (const c of cats) {
-    let existing = guild.channels.cache.find((ch) => ch.type === ChannelType.GuildCategory && ch.name === c.name);
-    if (!existing) {
-      existing = await guild.channels.create({
+    try {
+      const created = await guild.channels.create({
         name: c.name,
         type: ChannelType.GuildCategory,
         reason: `Backup restore: ${data.name}`
       });
+      catMap.set(c.id, created);
+      await sleep(350);
+    } catch (e) {
+      await log(`⚠️ Category \`${c.name}\`: ${e.message}`);
     }
-    catMap.set(c.id, existing);
   }
 
+  // 4) Channels
   const chans = [...(data.channels || [])].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
-  await log(`📢 Restoring **${chans.length}** channels…`);
+  await log(`📢 Creating **${chans.length}** channels…`);
   const channelMap = new Map();
 
   for (const c of chans) {
@@ -234,86 +318,67 @@ async function restoreBackup(guild, name, progress) {
     let parent = null;
     if (c.parentId && catMap.has(c.parentId)) parent = catMap.get(c.parentId);
     else if (c.parentName) {
-      parent = guild.channels.cache.find((ch) => ch.type === ChannelType.GuildCategory && ch.name === c.parentName) || null;
+      parent = [...catMap.values()].find((ch) => ch.name === c.parentName) || null;
     }
 
-    let existing = guild.channels.cache.find((ch) => ch.name === c.name && ch.type === type);
-    if (!existing) {
-      try {
-        existing = await guild.channels.create({
-          name: c.name,
-          type,
-          parent: parent || undefined,
-          topic: c.topic || undefined,
-          nsfw: !!c.nsfw,
-          rateLimitPerUser: c.rateLimitPerUser || 0,
-          reason: `Backup restore: ${data.name}`
-        });
-      } catch (e) {
-        await log(`⚠️ Channel \`#${c.name}\`: ${e.message}`);
-        continue;
-      }
+    try {
+      const created = await guild.channels.create({
+        name: c.name,
+        type,
+        parent: parent || undefined,
+        topic: c.topic || undefined,
+        nsfw: !!c.nsfw,
+        rateLimitPerUser: c.rateLimitPerUser || 0,
+        reason: `Backup restore: ${data.name}`
+      });
+      channelMap.set(c.id, created);
+      await sleep(350);
+    } catch (e) {
+      await log(`⚠️ Channel \`#${c.name}\`: ${e.message}`);
     }
-    channelMap.set(c.id, existing);
   }
 
-  await log(`💬 Restoring messages (up to ${data.msgLimit || MSG_LIMIT}/channel)…`);
+  // 5) Messages via webhook (looks like real users)
+  await log(`💬 Restoring messages (webhook style, up to ${data.msgLimit || MSG_LIMIT}/ch)…`);
   let msgRestored = 0;
   for (const c of chans) {
     const target = channelMap.get(c.id);
     if (!target?.isTextBased?.()) continue;
     const msgs = c.messages || [];
     if (!msgs.length) continue;
-    try {
+
+    for (const m of msgs) {
+      const ok = await sendAsUser(target, m);
+      if (ok) msgRestored++;
+      await sleep(500);
+    }
+
+    if (c.isAnnouncement && msgs.length) {
+      const last = msgs[msgs.length - 1];
       await target.send({
         embeds: [
           new EmbedBuilder()
-            .setColor(brand.color || 0x9b59b6)
-            .setTitle('📦 Backup restore')
-            .setDescription(`History for **#${c.name}** — ${msgs.length} messages.`)
-            .setFooter({ text: `Backup: ${data.name}` })
+            .setColor(brand.gold || 0xf1c40f)
+            .setTitle('📌 Latest from backup')
+            .setDescription(
+              [
+                last.authorName || last.authorTag || '',
+                last.content || '_no text_',
+                last.createdAt ? `\n_${last.createdAt}_` : ''
+              ].filter(Boolean).join('\n').slice(0, 4000)
+            )
         ]
       }).catch(() => {});
-
-      for (const m of msgs) {
-        const bits = [];
-        if (m.authorTag) bits.push(`**${m.authorTag}:**`);
-        if (m.content) bits.push(m.content);
-        let content = bits.join(' ').slice(0, 2000);
-        if (!content && m.attachments?.length) content = m.attachments.map((a) => a.url).join('\n').slice(0, 2000);
-        if (!content) continue;
-        try {
-          await target.send({ content });
-          msgRestored++;
-          if (msgRestored % 5 === 0) await new Promise((r) => setTimeout(r, 1200));
-        } catch (_) {}
-      }
-
-      if (c.isAnnouncement && msgs.length) {
-        const last = msgs[msgs.length - 1];
-        await target.send({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(brand.gold || 0xf1c40f)
-              .setTitle('📌 Latest from backup')
-              .setDescription(
-                [last.authorTag ? `**${last.authorTag}**` : '', last.content || '_no text_', last.createdAt ? `\n_${last.createdAt}_` : '']
-                  .filter(Boolean).join('\n').slice(0, 4000)
-              )
-          ]
-        }).catch(() => {});
-      }
-    } catch (e) {
-      await log(`⚠️ Messages #${c.name}: ${e.message}`);
     }
   }
 
+  // 6) Members: unban + pending roles (cannot force-add)
   await log(`🔓 Unbanning / tracking **${(data.members || []).length}** members…`);
   let unbanned = 0;
   const pending = getPendingMembers();
   for (const mem of data.members || []) {
     const roleIds = (mem.roleNames || [])
-      .map((n) => roleByName.get(n)?.id || guild.roles.cache.find((r) => r.name === n)?.id)
+      .map((n) => roleByName.get(n)?.id)
       .filter(Boolean);
     pending[mem.id] = { roleIds, tag: mem.tag, backup: data.name, at: new Date().toISOString() };
     try {
@@ -326,10 +391,8 @@ async function restoreBackup(guild, name, progress) {
   let inviteUrl = null;
   try {
     const ch =
-      guild.systemChannel ||
-      guild.channels.cache.find(
-        (c) => c.isTextBased?.() && c.permissionsFor?.(guild.members.me)?.has?.(PermissionFlagsBits.CreateInstantInvite)
-      );
+      [...channelMap.values()].find((c) => c.isTextBased?.()) ||
+      guild.systemChannel;
     if (ch) {
       const inv = await ch.createInvite({ maxAge: 0, maxUses: 0, reason: `Backup restore: ${data.name}` });
       inviteUrl = inv.url;
@@ -338,7 +401,7 @@ async function restoreBackup(guild, name, progress) {
 
   return {
     name: data.name,
-    categories: cats.length,
+    categories: catMap.size,
     channels: channelMap.size,
     roles: roleByName.size,
     messages: msgRestored,
@@ -352,7 +415,7 @@ async function applyPendingMemberRoles(member) {
   try {
     const pending = getPendingMembers();
     const entry = pending[member.id];
-    if (!entry || !entry.roleIds?.length) return false;
+    if (!entry?.roleIds?.length) return false;
     const roles = entry.roleIds.filter((id) => member.guild.roles.cache.has(id));
     if (roles.length) await member.roles.add(roles, 'Backup restore: roles from snapshot').catch(() => {});
     delete pending[member.id];
@@ -374,7 +437,7 @@ async function postBackupFile(client, name, json) {
       embeds: [
         new EmbedBuilder()
           .setColor(brand.green || 0x2ecc71)
-          .setTitle('📦 Backup file saved')
+          .setTitle('📦✨ Backup file saved')
           .setDescription(`**\`${safeName(name)}\`**\nLoad: \`${brand.PREFIX || '-'}backup load ${safeName(name)}\``)
           .setTimestamp()
       ],
@@ -412,7 +475,7 @@ async function handleBackupMessage(message, client) {
   if (!parsed) return false;
 
   if (!isStaff(message.member)) {
-    await message.reply({ content: 'Staff only.' }).catch(() => {});
+    await message.reply({ content: '🔒 Staff only.' }).catch(() => {});
     return true;
   }
 
@@ -426,11 +489,11 @@ async function handleBackupMessage(message, client) {
       ch = message.guild.channels.cache.get(id);
     }
     if (!ch?.isTextBased?.()) {
-      await message.reply({ content: `Usage: \`${prefix}backuplogs #channel\`` }).catch(() => {});
+      await message.reply({ content: `📌 Usage: \`${prefix}backuplogs #channel\`` }).catch(() => {});
       return true;
     }
     setBackupLogsChannelId(ch.id);
-    await message.reply({ content: `📦 Backup JSON files will be posted in ${ch}.` }).catch(() => {});
+    await message.reply({ content: `📦✨ Backup JSON will be posted in ${ch}.` }).catch(() => {});
     return true;
   }
 
@@ -439,17 +502,16 @@ async function handleBackupMessage(message, client) {
       embeds: [
         new EmbedBuilder()
           .setColor(brand.color || 0x9b59b6)
-          .setTitle('📦 Server backup')
+          .setTitle('📦✨ Server backup')
           .setDescription([
-            `\`${prefix}backup <name>\` — save channels, roles, members, messages`,
+            `\`${prefix}backup <name>\` — save everything`,
             `\`${prefix}backup list\``,
-            `\`${prefix}backup load <name>\` — restore + unban + roles on rejoin`,
+            `\`${prefix}backup load <name>\` — **wipe + recreate** channels/roles + messages`,
             `\`${prefix}backup delete <name>\``,
-            `\`${prefix}backuplogs #channel\` — auto-send backup file here`,
+            `\`${prefix}backuplogs #channel\``,
             '',
-            `Messages: **${MSG_LIMIT}** per channel (30–50).`,
-            '',
-            '⚠️ Discord **cannot force-add** members. Load **unbans** them; roles apply when they **rejoin**.'
+            `💬 Messages: **${MSG_LIMIT}**/channel via webhook (looks like real users)`,
+            '🔓 Members: unban + auto-roles on **rejoin** (Discord blocks force-add)'
           ].join('\n'))
           .setFooter({ text: 'DashMod · anti-raid' })
       ]
@@ -461,7 +523,7 @@ async function handleBackupMessage(message, client) {
     const list = listBackups();
     const desc = list.length
       ? list.map((b, i) =>
-          `**${i + 1}.** \`${b.name}\` — ${b.categories} cats · ${b.channels} ch · ${b.roles} roles · ${b.members} members` +
+          `**${i + 1}.** \`${b.name}\` — ${b.categories} 📁 · ${b.channels} 📢 · ${b.roles} 👑 · ${b.members} 👥` +
           (b.at ? `\n└ ${b.at}` : '')
         ).join('\n')
       : '_No backups yet._';
@@ -478,7 +540,7 @@ async function handleBackupMessage(message, client) {
     }
     const p = backupPath(parsed.name);
     if (!fs.existsSync(p)) {
-      await message.reply({ content: `Not found: \`${safeName(parsed.name)}\`` }).catch(() => {});
+      await message.reply({ content: `❌ Not found: \`${safeName(parsed.name)}\`` }).catch(() => {});
       return true;
     }
     fs.unlinkSync(p);
@@ -491,8 +553,8 @@ async function handleBackupMessage(message, client) {
       embeds: [
         new EmbedBuilder()
           .setColor(brand.blurple || 0x5865f2)
-          .setTitle('⏳ Creating backup…')
-          .setDescription(`Name: \`${safeName(parsed.name)}\`\nChannels · roles · members · **${MSG_LIMIT}** msgs/channel`)
+          .setTitle('⏳✨ Creating backup…')
+          .setDescription(`Name: \`${safeName(parsed.name)}\`\n📁 channels · 👑 roles · 👥 members · 💬 ${MSG_LIMIT} msgs`)
       ]
     }).catch(() => null);
 
@@ -501,14 +563,14 @@ async function handleBackupMessage(message, client) {
       const file = new AttachmentBuilder(Buffer.from(json, 'utf8'), { name: `backup-${data.name}.json` });
       const embed = new EmbedBuilder()
         .setColor(brand.green || 0x2ecc71)
-        .setTitle('✅ Backup saved')
+        .setTitle('✅📦 Backup saved')
         .setDescription([
           `**Name:** \`${data.name}\``,
-          `**Categories:** ${data.categories.length}`,
-          `**Channels:** ${data.channels.length}`,
-          `**Roles:** ${data.roles.length}`,
-          `**Members:** ${data.members.length}`,
-          `**Msgs/channel:** up to ${MSG_LIMIT}`,
+          `📁 **Categories:** ${data.categories.length}`,
+          `📢 **Channels:** ${data.channels.length}`,
+          `👑 **Roles:** ${data.roles.length}`,
+          `👥 **Members:** ${data.members.length}`,
+          `💬 **Msgs/channel:** up to ${MSG_LIMIT}`,
           '',
           `Load: \`${prefix}backup load ${data.name}\``
         ].join('\n'))
@@ -519,7 +581,7 @@ async function handleBackupMessage(message, client) {
       else await message.channel.send({ embeds: [embed], files: [file] }).catch(() => {});
       await postBackupFile(botClient, data.name, json);
     } catch (e) {
-      const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('Backup failed').setDescription(e.message || String(e));
+      const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('❌ Backup failed').setDescription(e.message || String(e));
       if (status) await status.edit({ embeds: [err] }).catch(() => {});
       else await message.reply({ embeds: [err] }).catch(() => {});
     }
@@ -533,16 +595,20 @@ async function handleBackupMessage(message, client) {
     }
     const me = message.guild.members.me;
     if (!me?.permissions?.has(PermissionFlagsBits.ManageChannels)) {
-      await message.reply({ content: 'Need **Manage Channels**.' }).catch(() => {});
+      await message.reply({ content: '❌ Need **Manage Channels** (+ Manage Roles, Manage Webhooks).' }).catch(() => {});
       return true;
     }
 
     const status = await message.reply({
       embeds: [
         new EmbedBuilder()
-          .setColor(brand.blurple || 0x5865f2)
-          .setTitle('⏳ Restoring backup…')
-          .setDescription(`Loading \`${safeName(parsed.name)}\`…`)
+          .setColor(0xe67e22)
+          .setTitle('⚠️⏳ Full restore starting…')
+          .setDescription(
+            `Loading \`${safeName(parsed.name)}\`\n\n` +
+            'This will **DELETE** current channels / categories / roles, then recreate from backup.\n' +
+            'This channel is kept until the end.'
+          )
       ]
     }).catch(() => null);
 
@@ -555,32 +621,33 @@ async function handleBackupMessage(message, client) {
             .setTitle('⏳ Restoring…')
             .setDescription(String(text).slice(0, 4000))
         ]
-      });
+      }).catch(() => {});
     };
 
     try {
-      const result = await restoreBackup(message.guild, parsed.name, progress);
+      const result = await restoreBackup(message.guild, parsed.name, progress, message.channel.id);
       const embed = new EmbedBuilder()
         .setColor(brand.green || 0x2ecc71)
-        .setTitle('✅ Restore complete')
+        .setTitle('✅✨ Restore complete')
         .setDescription([
           `**Backup:** \`${result.name}\``,
-          `**Categories:** ${result.categories}`,
-          `**Channels:** ${result.channels}`,
-          `**Roles:** ${result.roles}`,
-          `**Messages restored:** ${result.messages}`,
-          `**Unbanned:** ${result.unbanned}`,
-          `**Members tracked:** ${result.membersTracked}`,
-          result.inviteUrl ? `\n**Rejoin invite:** ${result.inviteUrl}` : '',
+          `📁 **Categories:** ${result.categories}`,
+          `📢 **Channels:** ${result.channels}`,
+          `👑 **Roles:** ${result.roles}`,
+          `💬 **Messages (webhook):** ${result.messages}`,
+          `🔓 **Unbanned:** ${result.unbanned}`,
+          `👥 **Tracked for roles:** ${result.membersTracked}`,
+          result.inviteUrl ? `\n🔗 **Rejoin invite:** ${result.inviteUrl}` : '',
           '',
-          'Members must **rejoin**. Roles apply automatically on join.'
+          '👥 Members must **rejoin** — Discord cannot force-add them.',
+          '👑 Roles apply automatically when they join.'
         ].filter(Boolean).join('\n'))
         .setFooter({ text: 'DashMod · anti-raid' })
         .setTimestamp();
       if (status) await status.edit({ embeds: [embed] }).catch(() => {});
       else await message.channel.send({ embeds: [embed] }).catch(() => {});
     } catch (e) {
-      const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('Restore failed').setDescription(e.message || String(e));
+      const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('❌ Restore failed').setDescription(e.message || String(e));
       if (status) await status.edit({ embeds: [err] }).catch(() => {});
       else await message.reply({ embeds: [err] }).catch(() => {});
     }
