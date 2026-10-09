@@ -46,7 +46,7 @@ async function handleCommand(message, client) {
     const aliases = { xboxcode: 'xbox_code' };
     const key = aliases[cmd] || cmd;
     const reserved = new Set([
-      'help','commands','stock','stockadd','stocktake','stockget','i','invites','inv','pass','check','mcheck',
+      'help','commands','stock','stockadd','stocktake','stockget','i','invites','inv',
       'bot','panel','dashboard','sban','unsban','access','genhelp','fgen','bgen','pgen','cstatus','addinvite',
       'ainv','rmi','m','messages','lb','rank','level','ban','kick','timeout','mute','purge','clear','ping'
     ]);
