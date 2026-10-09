@@ -1,11 +1,13 @@
 /**
  * -psd email:username (multiple) or attach file
- * Display-only: delete user msg → "Process is being done..." → results
+ * Also accepts bare email (uses local-part as new username)
+ * Delete user msg → "Process is being done..." → results
  */
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const brand = require('../config/brand');
 
 const CMD = new Set(['psd', 'userchange', 'uname']);
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
 function random8() {
   let s = '';
@@ -16,13 +18,21 @@ function random8() {
 function parsePairs(text) {
   const out = [];
   const seen = new Set();
-  const re = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*[:|;]\s*([^\s|:;]+)/g;
   const lines = String(text || '').replace(/\r/g, '').split('\n');
+
+  // email:username
+  const rePair = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*[:|;]\s*([^\s|:;]+)/g;
+  // bare email
+  const reEmail = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+
   for (const line of lines) {
     if (/got from|server name|=======|checked by/i.test(line) && !line.includes('@')) continue;
-    re.lastIndex = 0;
+
+    let matched = false;
+    rePair.lastIndex = 0;
     let m;
-    while ((m = re.exec(line)) !== null) {
+    while ((m = rePair.exec(line)) !== null) {
+      matched = true;
       const email = m[1].trim();
       const username = m[2].trim();
       const k = email.toLowerCase() + ':' + username;
@@ -30,24 +40,34 @@ function parsePairs(text) {
       seen.add(k);
       out.push({ email, username });
     }
+
+    if (!matched) {
+      reEmail.lastIndex = 0;
+      while ((m = reEmail.exec(line)) !== null) {
+        const email = m[1].trim();
+        const local = email.split('@')[0] || random8();
+        const k = email.toLowerCase() + ':' + local;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ email, username: local });
+      }
+    }
   }
   return out;
 }
 
 async function readAtt(att) {
-  if (!att || att.size > 2 * 1024 * 1024) return null;
+  if (!att) return { error: 'no_file' };
+  if (att.size > MAX_FILE_BYTES) return { error: 'too_big', size: att.size };
   try {
     const res = await fetch(att.url);
-    if (!res.ok) return null;
-    return await res.text();
+    if (!res.ok) return { error: 'fetch_fail' };
+    return { text: await res.text() };
   } catch {
-    return null;
+    return { error: 'fetch_fail' };
   }
 }
 
-/**
- * @returns {Promise<boolean>}
- */
 async function handlePsdMessage(message) {
   if (!message.guild || message.author.bot) return false;
   const prefix = brand.PREFIX || '-';
@@ -59,45 +79,72 @@ async function handlePsdMessage(message) {
   if (!CMD.has(cmd)) return false;
 
   let source = parts.slice(1).join(' ').trim();
+  let fileError = null;
+
   if (message.attachments.size) {
     const att = message.attachments.first();
-    const t = await readAtt(att);
-    if (t) source = (source ? source + '\n' : '') + t;
+    const r = await readAtt(att);
+    if (r.text) source = (source ? source + '\n' : '') + r.text;
+    else fileError = r.error === 'too_big' ? 'too_big:' + r.size : r.error;
+  }
+
+  if (fileError && !source.includes('@')) {
+    const mb = fileError.startsWith('too_big:')
+      ? (Number(fileError.split(':')[1]) / (1024 * 1024)).toFixed(1)
+      : null;
+    await message
+      .reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(brand.red || 0xe74c3c)
+            .setTitle('🔄 psd · file error')
+            .setDescription(
+              mb
+                ? `File is **${mb} MB**. Max is **15 MB**.`
+                : 'Could not read the attachment.'
+            )
+            .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
+        ]
+      })
+      .catch(() => {});
+    return true;
   }
 
   const pairs = parsePairs(source);
   if (!pairs.length) {
-    await message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(brand.gold || 0xf1c40f)
-          .setTitle('🔄 psd · username display')
-          .setDescription(
-            [
-              `Usage: \`${prefix}psd email:username\``,
-              `Multiple: \`${prefix}psd a@x.com:user1 b@y.com:user2\``,
-              `Or: \`${prefix}psd\` + attach \`.txt\``,
-              '',
-              '_Display only — nothing is changed on any account._'
-            ].join('\n')
-          )
-          .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
-      ]
-    }).catch(() => {});
+    await message
+      .reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(brand.gold || 0xf1c40f)
+            .setTitle('🔄 psd · username display')
+            .setDescription(
+              [
+                `Usage: \`${prefix}psd email:username\``,
+                `Or email only: \`${prefix}psd name@outlook.com\``,
+                `Multiple: \`${prefix}psd a@x.com:user1 b@y.com:user2\``,
+                `Or: \`${prefix}psd\` + attach \`.txt\``
+              ].join('\n')
+            )
+            .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
+        ]
+      })
+      .catch(() => {});
     return true;
   }
 
-  // Delete user message on the spot
   await message.delete().catch(() => {});
 
-  const waitMs = 15000 + Math.floor(Math.random() * 4000); // 15–19s
+  const waitMs = 15000 + Math.floor(Math.random() * 4000);
   const processing = await message.channel
     .send({
       embeds: [
         new EmbedBuilder()
           .setColor(brand.blurple || 0x5865f2)
           .setTitle('⏳ Process is being done...')
-          .setDescription(`Working on **${pairs.length}** entr${pairs.length === 1 ? 'y' : 'ies'}.\nPlease wait…`)
+          .setDescription(
+            `Working on **${pairs.length}** entr${pairs.length === 1 ? 'y' : 'ies'}.\nPlease wait…`
+          )
           .setFooter({ text: 'DashMod' })
       ]
     })
@@ -114,14 +161,10 @@ async function handlePsdMessage(message) {
     ].join('\n');
   });
 
-  const desc =
-    blocks.join('\n\n') +
-    '\n\n***sir, i may contain fake informations but trust me :lol:.***';
-
   const embed = new EmbedBuilder()
     .setColor(brand.green || 0x2ecc71)
     .setTitle('✅ Process complete')
-    .setDescription(desc.slice(0, 3900))
+    .setDescription(blocks.join('\n\n').slice(0, 3900))
     .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
     .setTimestamp();
 
@@ -133,7 +176,6 @@ async function handlePsdMessage(message) {
     await message.channel.send({ embeds: [embed] }).catch(() => {});
   }
 
-  // If many entries, also attach txt
   if (pairs.length > 5) {
     const lines = pairs.map((p) => {
       const oldUser = random8();
@@ -142,8 +184,7 @@ async function handlePsdMessage(message) {
     const file = new AttachmentBuilder(
       Buffer.from(
         '=============================\n🎉 DashMod psd result\n⚡ Ultimate Rewards\n=============================\n\n' +
-          lines.join('\n') +
-          '\nsir, i may contain fake informations but trust me :lol:.\n',
+          lines.join('\n'),
         'utf8'
       ),
       { name: 'psd-result.txt' }
@@ -155,4 +196,4 @@ async function handlePsdMessage(message) {
 }
 
 module.exports = { handlePsdMessage };
-    
+  
