@@ -20,7 +20,8 @@ const { handleMentions } = require('./systems/pingProtect');
 const { askAI } = require('./systems/ai');
 const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
-const { handlePassMessage, handleCheckButton } = require('./systems/passChanger');
+const { handleExeMessage } = require('./systems/exeClean');
+const { handlePsdMessage } = require('./systems/psd');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
@@ -294,7 +295,8 @@ client.on('messageCreate', async (message) => {
     return;
   }
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
-  if (await handlePassMessage(message, client).catch((e) => { console.error('pass', e.message); return false; })) return;
+  if (await handleExeMessage(message, client).catch((e) => { console.error('exe', e.message); return false; })) return;
+  if (await handlePsdMessage(message, client).catch((e) => { console.error('psd', e.message); return false; })) return;
   if (await handleIAmHere(message).catch(() => false)) return;
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
@@ -333,10 +335,6 @@ client.on('interactionCreate', async (interaction) => {
   try {
     if (interaction.isButton() && interaction.customId.startsWith('ttt:')) {
       await ttt.handleButton(interaction);
-      return;
-    }
-    if (interaction.isButton() && interaction.customId.startsWith('mcheck:')) {
-      await handleCheckButton(interaction);
       return;
     }
     if (interaction.isButton() && interaction.customId === 'gw_enter') {

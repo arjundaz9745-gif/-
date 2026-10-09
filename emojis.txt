@@ -1,0 +1,96 @@
+DASHMOD / ULTIMATE REWARDS — EMOJI LIST
+========================================
+Unicode emojis used in the bot (always work).
+Custom server emojis need to exist on YOUR Discord server
+with the names below, or the bot falls back to unicode.
+
+── GENERAL UI ──
+🎉  party / success / checked by
+✨  sparkle / complete / FA
+⚡  lightning / legit
+🌸  flower / requested by
+⏳  hourglass / processing
+✅  check / success / kept
+❌  cross / fail
+⚠️  warning  (code may use ⚠)
+🗑️  trash / removed  (code may use 🗑)
+📥  inbox / checked count
+📋  clipboard / result
+🧹  broom / exe clean
+🔄  refresh / psd
+👤  user / username
+📧  email
+🔒  lock
+🔑  key
+🔐  locked with key
+📌  pin
+📝  memo
+📜  scroll
+📢  announcement
+🔔  bell
+❓  question
+🌐  globe
+🚀  rocket
+👑  crown
+🏆  trophy
+💰  money
+💳  card
+💎  gem / nitro
+🎫  ticket
+🎟️  admission  (🎟)
+🎁  gift
+👍  thumbs up
+👎  thumbs down
+😈  devil
+🛡️  shield  (🛡)
+🛠️  tools  (🛠)
+📡  satellite / stream
+📺  TV / netflix
+🎧  headphones / spotify
+🍿  popcorn / crunchyroll
+🍩  donut
+🎮  game / hypixel
+🕹️  joystick / steam  (🕹)
+🎯  target / xbox
+⛏️  pickaxe / minecraft  (⛏)
+⚔️  crossed swords / mcfa  (⚔)
+🟣  purple circle (bgen stock)
+🟡  yellow circle (fgen stock)
+💠  diamond shape
+☰  menu (web)
+
+── CUSTOM SERVER EMOJI NAMES (from stocks / gen) ──
+These are looked up by name on the guild; if missing → unicode fallback:
+
+minecraft        → ⛏️ / ⚔️
+hypixel          → 🎮
+xbox             → 🎯
+netflix          → 📺
+crunchyroll      → 🍿
+spotify          → 🎧
+nitro            → 💎
+robux            → 💰
+steam            → 🕹️
+email            → 📧
+stream           → 📡
+donut            → 🍩
+ultimate_rewards → ✨
+ticket           → 🎟️
+s_yellow         → 🟡
+purple_1         → 🟣
+stock            → 📦
+prot             → (protection custom, if any)
+
+── COMMAND SHORTCUTS ──
+-exe   cleaner (format filter only)
+-psd   username display (fake process, 15s)
+-clean / -filter  → same as -exe
+
+── NOTES ──
+• Discord "animated" emojis only work if they are CUSTOM
+  animated emojis uploaded to your server (nitro-style <a:name:id>).
+• Unicode emoji above cannot animate.
+• To use animated: upload animated GIF emojis to the server,
+  then we can map names like a_loading, a_success in code.
+
+Powered by Ultimate Rewards · DashMod
