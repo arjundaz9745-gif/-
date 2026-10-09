@@ -9,7 +9,6 @@ const { E } = require('../utils/embeds');
 const { inviteBreakdown } = require('../systems/invites');
 const { exportToChannel, importFromChannel } = require('../systems/sync');
 const runtimeLog = require('../systems/runtimeLog');
-const { getPassData, completeJob } = require('../systems/passChanger');
 const { ActivityType } = require('discord.js');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -301,41 +300,6 @@ function startWebServer(client) {
           const pgen = data.pgen || {};
           const sum = (m) => Object.fromEntries(Object.entries(m).map(([k, v]) => [k, (v || []).length]));
           return json(res, 200, { fgen: sum(fgen), bgen: sum(bgen), pgen: sum(pgen), config: data.genConfig || {} });
-        }
-
-        if (p === '/api/admin/pass/complete' && req.method === 'POST') {
-          const body = await readBody(req);
-          const jobId = body.jobId || body.id;
-          if (!jobId) return json(res, 400, { error: 'jobId required' });
-          const job = completeJob(jobId, {
-            status: body.status === 'failed' ? 'failed' : 'success',
-            newpass: body.newpass || null,
-            note: body.note || 'dashboard'
-          });
-          if (!job) return json(res, 404, { error: 'Job not found' });
-          runtimeLog.info('Pass job ' + jobId + ' → ' + job.status);
-          // DM user if possible
-          try {
-            const u = await client.users.fetch(job.userId);
-            if (job.status === 'success') {
-              await u.send({
-                content: `Pass change **success** for \`${job.email}\`\nNew password: ||${job.result?.newpass || job.newpass || '(see staff)'}||`
-              }).catch(() => {});
-            } else {
-              await u.send(`Pass change **failed** for \`${job.email}\`. Contact staff.`).catch(() => {});
-            }
-          } catch (_) {}
-          return json(res, 200, { ok: true, job });
-        }
-
-        if (p === '/api/admin/pass' && req.method === 'GET') {
-          const pc = data.passChanger || { queue: [], history: [], stats: {} };
-          return json(res, 200, {
-            enabled: pc.enabled !== false,
-            queue: (pc.queue || []).slice(-50),
-            history: (pc.history || []).slice(-30),
-            stats: pc.stats || {}
-          });
         }
 
         if (p === '/api/admin/announce' && req.method === 'POST') {
