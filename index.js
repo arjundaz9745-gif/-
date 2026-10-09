@@ -22,6 +22,7 @@ const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
 const { handleExeMessage } = require('./systems/exeClean');
 const { handlePsdMessage } = require('./systems/psd');
+const { handleBackupMessage, applyPendingMemberRoles } = require('./systems/serverBackup');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
@@ -173,6 +174,7 @@ async function onReady() {
 
 client.on('guildMemberAdd', async (member) => {
   try { runtimeLog.info(`JOIN ${member.user.tag} → ${member.guild.name}`); } catch (_) {}
+  try { await applyPendingMemberRoles(member); } catch (_) {}
   const data = dataStore.get();
   try {
     if (data.autorole?.[member.guild.id]) await member.roles.add(data.autorole[member.guild.id]).catch(() => {});
@@ -297,6 +299,7 @@ client.on('messageCreate', async (message) => {
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
   if (await handleExeMessage(message, client).catch((e) => { console.error('exe', e.message); return false; })) return;
   if (await handlePsdMessage(message, client).catch((e) => { console.error('psd', e.message); return false; })) return;
+  if (await handleBackupMessage(message, client).catch((e) => { console.error('backup', e.message); return false; })) return;
   if (await handleIAmHere(message).catch(() => false)) return;
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
