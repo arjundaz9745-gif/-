@@ -293,8 +293,45 @@ async function handleCommand(message, client) {
   if (cmd === 'lock' || cmd === 'unlock') {
     if (!needStaff()) return true;
     const ch = message.mentions.channels.first() || message.channel;
-    await ch.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: cmd === 'lock' ? false : null }).catch(() => {});
-    await message.reply({ embeds: [E(cmd === 'lock' ? 'Locked' : 'Unlocked', `${ch}`, brand.green)] });
+    const role = message.mentions.roles.first();
+
+    if (cmd === 'unlock') {
+      await ch.permissionOverwrites.edit(message.guild.roles.everyone, {
+        SendMessages: null,
+        ViewChannel: null
+      }).catch(() => {});
+      if (role) {
+        await ch.permissionOverwrites.delete(role).catch(() => {});
+      }
+      await message.reply({ embeds: [E('Unlocked', `${ch}`, brand.green)] });
+      return true;
+    }
+
+    // -lock  → everyone cannot send
+    // -lock @role → channel only visible to that role (and staff/admins) + deny everyone view
+    if (role) {
+      await ch.permissionOverwrites.edit(message.guild.roles.everyone, {
+        ViewChannel: false,
+        SendMessages: false
+      }).catch(() => {});
+      await ch.permissionOverwrites.edit(role, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true
+      }).catch(() => {});
+      await message.reply({
+        embeds: [
+          E(
+            'Locked · role access',
+            `${ch} is locked.\nOnly ${role} (and higher roles the bot can allow) can access this channel.`,
+            brand.green
+          )
+        ]
+      });
+    } else {
+      await ch.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false }).catch(() => {});
+      await message.reply({ embeds: [E('Locked', `${ch} — send messages disabled for @everyone`, brand.green)] });
+    }
     return true;
   }
   if (cmd === 'slowmode' || cmd === 'slow') {
@@ -497,13 +534,44 @@ async function handleCommand(message, client) {
   }
   if (cmd === 'steal' || cmd === 'addemoji') {
     if (!needStaff()) return true;
-    const match = (args[0] || '').match(/<(a?):([\w]+):(\d+)>/);
-    if (!match) return message.reply('`' + P + 'steal <emoji>`');
-    const url = `https://cdn.discordapp.com/emojis/${match[3]}.${match[1] === 'a' ? 'gif' : 'png'}?size=128`;
-    const name = (args[1] || match[2]).replace(/[^\w]/g, '').slice(0, 32) || 'emoji';
+    // -steal <emoji> [name]   e.g. -steal <:warn:123> warn   or  -steal <a:cry:123> cry
+    const rawEmoji = args[0] || '';
+    const match = rawEmoji.match(/<(a?):([\w]+):(\d+)>/);
+    if (!match) {
+      await message.reply({
+        embeds: [
+          E(
+            'Steal emoji',
+            [
+              `\`${P}steal <emoji> [name]\``,
+              'Example: `' + P + 'steal <:warn:123456789> warn`',
+              'Animated: `' + P + 'steal <a:cry:123456789> cry`',
+              '',
+              'Must be a **custom** Discord emoji (not unicode like ⚠️).',
+              'If you omit name, the original emoji name is used.'
+            ].join('\n'),
+            brand.gold
+          )
+        ]
+      });
+      return true;
+    }
+    const animated = match[1] === 'a';
+    const origName = match[2];
+    const emojiId = match[3];
+    const url = `https://cdn.discordapp.com/emojis/${emojiId}.${animated ? 'gif' : 'png'}?size=128`;
+    const name = (args[1] || origName).replace(/[^\w]/g, '').slice(0, 32) || 'emoji';
     try {
       const emoji = await message.guild.emojis.create({ attachment: url, name });
-      await message.reply({ embeds: [E('Emoji', `Added ${emoji}`, brand.green)] });
+      await message.reply({
+        embeds: [
+          E(
+            'Emoji added',
+            `Saved as **:${name}:** → ${emoji}\nOriginal: \`:${origName}:\`${animated ? ' (animated)' : ''}`,
+            brand.green
+          )
+        ]
+      });
     } catch (e) {
       await message.reply({ embeds: [E('Emoji', e.message, brand.red)] });
     }
