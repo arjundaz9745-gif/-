@@ -1,7 +1,7 @@
 /**
  * -psd email:username (multiple) or attach file
- * Also accepts bare email (uses local-part as new username)
- * Delete user msg → "Process is being done..." → results
+ * Deletes user message → processing → result
+ * Old username derived from email local-part + letters/digits
  */
 const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const brand = require('../config/brand');
@@ -9,25 +9,46 @@ const brand = require('../config/brand');
 const CMD = new Set(['psd', 'userchange', 'uname']);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 
-function random8() {
+function randomDigits(n) {
   let s = '';
-  for (let i = 0; i < 8; i++) s += Math.floor(Math.random() * 10);
+  for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 10);
   return s;
+}
+
+function randomLetters(n) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz';
+  let s = '';
+  for (let i = 0; i < n; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+/** Old username based on email, e.g. name@outlook.com → name846273 or name846273x */
+function oldUsernameFromEmail(email) {
+  const local = String(email || '').split('@')[0] || 'user';
+  // keep letters/numbers only from local part
+  let base = local.replace(/[^a-zA-Z0-9]/g, '');
+  if (!base) base = 'user';
+  // mix digits + at least one letter suffix sometimes
+  const digits = randomDigits(5 + Math.floor(Math.random() * 3)); // 5-7 digits
+  const letterBit = Math.random() < 0.55 ? randomLetters(1 + Math.floor(Math.random() * 2)) : '';
+  // styles: name846273 | name846273x | name846273-ab
+  const styles = [
+    () => base + digits,
+    () => base + digits + letterBit,
+    () => base + digits + (letterBit ? '-' + letterBit : randomLetters(2))
+  ];
+  return styles[Math.floor(Math.random() * styles.length)]().slice(0, 32);
 }
 
 function parsePairs(text) {
   const out = [];
   const seen = new Set();
   const lines = String(text || '').replace(/\r/g, '').split('\n');
-
-  // email:username
   const rePair = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*[:|;]\s*([^\s|:;]+)/g;
-  // bare email
   const reEmail = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
 
   for (const line of lines) {
     if (/got from|server name|=======|checked by/i.test(line) && !line.includes('@')) continue;
-
     let matched = false;
     rePair.lastIndex = 0;
     let m;
@@ -40,12 +61,11 @@ function parsePairs(text) {
       seen.add(k);
       out.push({ email, username });
     }
-
     if (!matched) {
       reEmail.lastIndex = 0;
       while ((m = reEmail.exec(line)) !== null) {
         const email = m[1].trim();
-        const local = email.split('@')[0] || random8();
+        const local = email.split('@')[0] || randomDigits(8);
         const k = email.toLowerCase() + ':' + local;
         if (seen.has(k)) continue;
         seen.add(k);
@@ -133,6 +153,7 @@ async function handlePsdMessage(message) {
     return true;
   }
 
+  // Delete user command message immediately
   await message.delete().catch(() => {});
 
   const waitMs = 15000 + Math.floor(Math.random() * 4000);
@@ -153,18 +174,29 @@ async function handlePsdMessage(message) {
   await new Promise((r) => setTimeout(r, waitMs));
 
   const blocks = pairs.map((p) => {
-    const oldUser = random8();
+    const oldUser = oldUsernameFromEmail(p.email);
     return [
       `📧 **Email** : \`${p.email}\``,
       `👤 **Password** : \`${oldUser}\``,
-      `✨ **New Password** : \`${p.username}\``
+      `✨ ***New password*** : \`${p.username}\``
     ].join('\n');
   });
+
+  const cry = (() => {
+    const g = message.guild;
+    if (!g?.emojis?.cache) return '😢';
+    const hit =
+      g.emojis.cache.find((e) => e.name === 'cry') ||
+      g.emojis.cache.find((e) => e.name?.toLowerCase() === 'cry');
+    return hit ? hit.toString() : '😢';
+  })();
 
   const embed = new EmbedBuilder()
     .setColor(brand.green || 0x2ecc71)
     .setTitle('✅ Process complete')
-    .setDescription(blocks.join('\n\n').slice(0, 3900))
+    .setDescription(
+      (blocks.join('\n\n') + '\n\n***' + cry + ' maybe... I fill fake information***').slice(0, 3900)
+    )
     .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
     .setTimestamp();
 
@@ -178,7 +210,7 @@ async function handlePsdMessage(message) {
 
   if (pairs.length > 5) {
     const lines = pairs.map((p) => {
-      const oldUser = random8();
+      const oldUser = oldUsernameFromEmail(p.email);
       return `Email: ${p.email}\nUsername: ${oldUser}\nNew username: ${p.username}\n`;
     });
     const file = new AttachmentBuilder(
@@ -195,5 +227,5 @@ async function handlePsdMessage(message) {
   return true;
 }
 
-module.exports = { handlePsdMessage };
+module.exports = { handlePsdMessage, oldUsernameFromEmail };
   
