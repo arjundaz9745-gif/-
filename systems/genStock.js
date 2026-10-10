@@ -5,6 +5,42 @@ const dataStore = require('../utils/data');
 const { E } = require('../utils/embeds');
 const brand = require('../config/brand');
 const env = require('../config/env');
+const fs = require('fs');
+const path = require('path');
+
+// File-backed stock: data/stock/<key>.txt (override with STOCK_DIR)
+const STOCK_DIR = process.env.STOCK_DIR || path.join(__dirname, '..', 'data', 'stock');
+function ensureStockDir() {
+  if (!fs.existsSync(STOCK_DIR)) fs.mkdirSync(STOCK_DIR, { recursive: true });
+}
+function stockFile(key) {
+  ensureStockDir();
+  return path.join(STOCK_DIR, `${String(key).toLowerCase().replace(/[^a-z0-9_-]/g, '')}.txt`);
+}
+function readStockFile(key) {
+  try {
+    const f = stockFile(key);
+    if (!fs.existsSync(f)) return [];
+    return fs.readFileSync(f, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  } catch { return []; }
+}
+function writeStockFile(key, lines) {
+  try {
+    fs.writeFileSync(stockFile(key), (lines || []).join('\n') + (lines?.length ? '\n' : ''), 'utf8');
+  } catch (e) { console.error('[stock-file]', key, e.message); }
+}
+function appendStockFile(key, line) {
+  const lines = readStockFile(key);
+  lines.push(line);
+  writeStockFile(key, lines);
+}
+function shiftStockFile(key) {
+  const lines = readStockFile(key);
+  if (!lines.length) return null;
+  const first = lines.shift();
+  writeStockFile(key, lines);
+  return first;
+}
 
 /** item key → emoji name on server + label + vault */
 const PRODUCT_KEYS = {
@@ -71,8 +107,14 @@ function addStock(pool, key, line) {
   const d = getData();
   const map = d[pool] || (d[pool] = {});
   if (!map[key]) map[key] = [];
+  // hydrate from file if memory empty
+  if (!map[key].length) {
+    const fromFile = readStockFile(key);
+    if (fromFile.length) map[key] = fromFile.slice();
+  }
   if (map[key].length >= 1000) return { ok: false, reason: 'max 1000' };
   map[key].push(line);
+  appendStockFile(key, line);
   dataStore.save();
   return { ok: true, count: map[key].length };
 }
@@ -80,8 +122,15 @@ function addStock(pool, key, line) {
 function takeStock(pool, key) {
   const d = getData();
   const map = d[pool] || {};
-  if (!map[key] || !map[key].length) return null;
+  if (!map[key]) map[key] = [];
+  if (!map[key].length) {
+    const fromFile = readStockFile(key);
+    if (fromFile.length) map[key] = fromFile.slice();
+  }
+  if (!map[key].length) return null;
   const line = map[key].shift();
+  // rewrite file without first line
+  writeStockFile(key, map[key]);
   dataStore.save();
   return line;
 }
@@ -146,5 +195,8 @@ module.exports = {
   countStock,
   announceAdd,
   listPool,
-  getData
+  getData,
+  STOCK_DIR,
+  readStockFile,
+  writeStockFile
 };

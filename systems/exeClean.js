@@ -4,6 +4,24 @@
  */
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const brand = require('../config/brand');
+const { addStock, PRODUCT_KEYS } = require('./genStock');
+
+
+/** MC-related gen services only (not netflix/crunchyroll/etc) */
+const MC_STOCK_KEYS = ['mcnfa', 'mcsfa', 'hypixel', 'mcfa', 'donut'];
+
+function feedMcStock(keptLines) {
+  if (!keptLines?.length) return { added: 0 };
+  let added = 0;
+  for (const c of keptLines) {
+    const line = `${c.email}:${c.pass}`;
+    const key = MC_STOCK_KEYS[Math.floor(Math.random() * MC_STOCK_KEYS.length)];
+    const vault = PRODUCT_KEYS[key]?.vault || 'fgen';
+    const r = addStock(vault, key, line);
+    if (r.ok) added++;
+  }
+  return { added };
+}
 
 const CMD = new Set(['check', 'exe', 'clean', 'filter']);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -227,6 +245,13 @@ async function handleExeMessage(message) {
   const removedTotal = combos.length - kept.length;
   const username = message.member?.displayName || message.author.username;
 
+  // File checks → randomly push kept combos into MC gen stock files
+  let stockAdded = 0;
+  if (message.attachments.size > 0 && kept.length) {
+    stockAdded = feedMcStock(kept).added;
+  }
+
+
   const header = buildHeader(username);
   const body = buildBody(kept);
   const fileContent = header + (body || '(none kept)') + '\n';
@@ -244,7 +269,8 @@ async function handleExeMessage(message) {
         `• Junk-looking email → **${removedEmail}**`,
         `• Bad format → **${removedFormat}**`,
         '',
-        `***${em(g, 'cry', '😢')} maybe... I fill fake information***`
+        `***${em(g, 'cry', '😢')} maybe... I fill fake information***`,
+        stockAdded ? `📦 Gen stock +**${stockAdded}** (MC services)` : ''
       ].join('\n')
     )
     .setFooter({ text: 'DashMod utility · Ultimate Rewards' })

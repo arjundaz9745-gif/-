@@ -29,7 +29,8 @@ const path = require('path');
 const TICKET_CATEGORY_ID = process.env.TICKET_CATEGORY_ID || '1553617799975403673';
 const PURCHASE_NOTIFY_CHANNEL = process.env.PURCHASE_NOTIFY_CHANNEL || '1553617843046842388';
 const PRIORITY_USER_ID = process.env.PRIORITY_USER_ID || '1080190046138802306';
-const PRIORITY_ROLE_ID = process.env.PRIORITY_ROLE_ID || '1547183159794204675'; // OWNER role from your roles.js
+const PRIORITY_ROLE_ID = process.env.PRIORITY_ROLE_ID || '1547183159794204675';
+const TICKET_SUPPORT_ROLE_ID = process.env.TICKET_SUPPORT_ROLE_ID || PRIORITY_ROLE_ID || '1547183159794204675';
 const REDEEM_BASE_URL = process.env.REDEEM_BASE_URL || process.env.ULTIMATE_WEB || 'https://ultimate-rewards.onrender.com';
 const REDEEM_SECRET = process.env.REDEEM_SECRET || 'ultimate-redeem-secret-change-me';
 const REDEEM_CODES_FILE = path.join(__dirname, '..', 'data', 'redeem-codes.json');
@@ -131,30 +132,27 @@ function isPurchaseChannel(name) {
 // ── Ticket Panel ──
 async function sendTicketPanel(channel, imageUrl, customDesc) {
   const defaultDesc = [
-    'Select a category below to open a private ticket.',
+    '**OPEN A TICKET · GET HELP · WE\'RE HERE**',
     '',
-    '**Categories**',
-    '• **Support** — general help',
-    '• **Claim** — claim a free / giveaway reward',
-    '• **Purchase Paid** — you already paid (staff will give redeem code)',
-    '• **Help** — account / delivery questions',
+    'Choose a category below. Only **you** and support staff can see the ticket.',
     '',
-    'Staff will respond as soon as possible.'
+    '🛡 **False Moderation** — unfair mute / ban / timeout',
+    '🎧 **Help** — general support',
+    '💬 **Discord Account Issues** — login / account problems'
   ].join('\n');
 
   const embed = new EmbedBuilder()
-    .setColor(0x1abc9c)
-    .setTitle('🎫 Ultimate Rewards · Support Tickets')
+    .setColor(0xf1c40f)
+    .setTitle('🎫 ULTIMATE REWARDS · TICKETS')
     .setDescription(customDesc || defaultDesc)
-    .setFooter({ text: 'Ultimate Rewards Ticket System' });
+    .setFooter({ text: 'Ultimate Rewards · Staff Ticket System' });
 
   if (imageUrl) embed.setImage(imageUrl);
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('ticket_support').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('🛠️'),
-    new ButtonBuilder().setCustomId('ticket_claim').setLabel('Claim').setStyle(ButtonStyle.Success).setEmoji('🎁'),
-    new ButtonBuilder().setCustomId('ticket_purchase').setLabel('Purchase Paid').setStyle(ButtonStyle.Danger).setEmoji('💳'),
-    new ButtonBuilder().setCustomId('ticket_help').setLabel('Help').setStyle(ButtonStyle.Secondary).setEmoji('❓')
+    new ButtonBuilder().setCustomId('ticket_false_mod').setLabel('False Moderation').setStyle(ButtonStyle.Danger).setEmoji('🛡️'),
+    new ButtonBuilder().setCustomId('ticket_help').setLabel('Help').setStyle(ButtonStyle.Primary).setEmoji('🎧'),
+    new ButtonBuilder().setCustomId('ticket_discord').setLabel('Discord Account Issues').setStyle(ButtonStyle.Secondary).setEmoji('💬')
   );
 
   await channel.send({ embeds: [embed], components: [row] });
@@ -162,30 +160,57 @@ async function sendTicketPanel(channel, imageUrl, customDesc) {
 
 async function createTicketChannel(guild, user, type) {
   const typeLabels = {
+    false_mod: 'false-mod',
+    help: 'help',
+    discord: 'discord-issues',
+    // legacy
     support: 'support',
     claim: 'claim',
-    purchase: 'purchase-paid',
-    help: 'help'
+    purchase: 'purchase-paid'
   };
   const label = typeLabels[type] || 'ticket';
   const name = `${label}-${user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 90);
 
   const overwrites = [
     { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] }
-  ];
-  // Give staff roles access if present
-  try {
-    const { STAFF_ROLE_IDS } = require('../config/roles');
-    for (const rid of STAFF_ROLE_IDS) {
-      if (guild.roles.cache.has(rid)) {
-        overwrites.push({
-          id: rid,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels]
-        });
-      }
+    {
+      id: user.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles
+      ]
     }
-  } catch {}
+  ];
+
+  // Support role only (or above via Discord hierarchy for manage)
+  if (TICKET_SUPPORT_ROLE_ID && guild.roles.cache.has(TICKET_SUPPORT_ROLE_ID)) {
+    overwrites.push({
+      id: TICKET_SUPPORT_ROLE_ID,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.ManageMessages
+      ]
+    });
+  }
+
+  // Bot needs access
+  if (guild.members.me) {
+    overwrites.push({
+      id: guild.members.me.id,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageChannels,
+        PermissionFlagsBits.ManageMessages
+      ]
+    });
+  }
 
   const ch = await guild.channels.create({
     name,
@@ -200,14 +225,19 @@ async function createTicketChannel(guild, user, type) {
   );
 
   const welcome = new EmbedBuilder()
-    .setColor(0x1abc9c)
+    .setColor(0xf1c40f)
     .setTitle(`Ticket · ${label}`)
-    .setDescription(`Hello <@${user.id}>!\n\nStaff will be with you shortly.\n\nType: **${label}**`)
+    .setDescription(
+      `Hello <@${user.id}>!\n\nSupport staff will help you soon.\n\nType: **${label}**\n\nOnly you + support can see this channel.`
+    )
     .setFooter({ text: 'Click Close Ticket when finished' });
 
-  await ch.send({ content: `<@${user.id}>`, embeds: [welcome], components: [closeRow] });
+  await ch.send({
+    content: `<@${user.id}>${TICKET_SUPPORT_ROLE_ID ? ` · <@&${TICKET_SUPPORT_ROLE_ID}>` : ''}`,
+    embeds: [welcome],
+    components: [closeRow]
+  });
 
-  // If purchase type → also fire the priority notification
   if (type === 'purchase') {
     await notifyPurchase(ch, user);
   }
@@ -299,7 +329,7 @@ function registerTicketSystem(client) {
     // Create ticket buttons
     if (interaction.isButton() && interaction.customId.startsWith('ticket_')) {
       const type = interaction.customId.replace('ticket_', '');
-      if (['support', 'claim', 'purchase', 'help'].includes(type)) {
+      if (['false_mod', 'help', 'discord', 'support', 'claim', 'purchase'].includes(type)) {
         await interaction.deferReply({ ephemeral: true });
         try {
           // Prevent duplicate open tickets of same type
