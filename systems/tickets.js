@@ -212,13 +212,43 @@ async function createTicketChannel(guild, user, type) {
     });
   }
 
-  const ch = await guild.channels.create({
-    name,
+  // Resolve category (invalid ID is a common fail)
+  let parentId = undefined;
+  if (TICKET_CATEGORY_ID) {
+    try {
+      const parent = await guild.channels.fetch(TICKET_CATEGORY_ID).catch(() => null);
+      if (parent && parent.type === ChannelType.GuildCategory) {
+        parentId = parent.id;
+      } else {
+        console.warn('[tickets] TICKET_CATEGORY_ID is not a category or missing:', TICKET_CATEGORY_ID);
+      }
+    } catch (e) {
+      console.warn('[tickets] category fetch', e.message);
+    }
+  }
+
+  let ch;
+  const topic = `Ticket for ${user.username || user.tag || user.id} (${user.id}) · type:${type}`;
+  const createOpts = {
+    name: name || `ticket-${user.id}`.slice(0, 90),
     type: ChannelType.GuildText,
-    parent: TICKET_CATEGORY_ID || undefined,
     permissionOverwrites: overwrites,
-    topic: `Ticket for ${user.tag} (${user.id}) · type:${type}`
-  });
+    topic
+  };
+
+  try {
+    ch = await guild.channels.create({ ...createOpts, parent: parentId });
+  } catch (e1) {
+    console.error('[tickets] create with parent failed:', e1.message);
+    // Retry without category
+    try {
+      ch = await guild.channels.create(createOpts);
+      console.warn('[tickets] created ticket without category');
+    } catch (e2) {
+      console.error('[tickets] create without parent failed:', e2.message);
+      throw new Error(e2.message || e1.message || 'channel create failed');
+    }
+  }
 
   const closeRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('ticket_close').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
@@ -343,7 +373,11 @@ function registerTicketSystem(client) {
           await interaction.editReply({ content: `Ticket created: ${ch}` });
         } catch (e) {
           console.error(e);
-          await interaction.editReply({ content: 'Failed to create ticket. Check bot permissions + category ID.' });
+          await interaction.editReply({
+            content:
+              'Failed to create ticket: `' + (e.message || 'unknown') + '`\n' +
+              'Need **Manage Channels**. Set `TICKET_CATEGORY_ID` to a valid **category** ID (or leave empty).'
+          });
         }
         return;
       }
