@@ -22,7 +22,7 @@ const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
 const { handleExeMessage } = require('./systems/exeClean');
 const { handlePsdMessage } = require('./systems/psd');
-const { handleBackupMessage, applyPendingMemberRoles } = require('./systems/serverBackup');
+const { handleBackupMessage, handleBackupInteraction, applyPendingMemberRoles } = require('./systems/serverBackup');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
@@ -118,7 +118,35 @@ async function onReady() {
         .setDescription('Play Tic Tac Toe')
         .addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true)),
       new SlashCommandBuilder().setName('stock').setDescription('View gen stock'),
-      new SlashCommandBuilder().setName('access').setDescription('Gen access guide')
+      new SlashCommandBuilder().setName('access').setDescription('Gen access guide'),
+      new SlashCommandBuilder()
+        .setName('backup')
+        .setDescription('Server backup (owners only)')
+        .addSubcommand((s) =>
+          s
+            .setName('save')
+            .setDescription('Save a backup')
+            .addStringOption((o) => o.setName('name').setDescription('Backup name').setRequired(true))
+        )
+        .addSubcommand((s) => s.setName('list').setDescription('List backups'))
+        .addSubcommand((s) =>
+          s
+            .setName('load')
+            .setDescription('Load/restore a backup (wipes structure)')
+            .addStringOption((o) => o.setName('name').setDescription('Backup name').setRequired(true))
+        )
+        .addSubcommand((s) =>
+          s
+            .setName('delete')
+            .setDescription('Delete a backup')
+            .addStringOption((o) => o.setName('name').setDescription('Backup name').setRequired(true))
+        )
+        .addSubcommand((s) =>
+          s
+            .setName('logs')
+            .setDescription('Set channel for auto backup files')
+            .addChannelOption((o) => o.setName('channel').setDescription('Text channel').setRequired(true))
+        )
     ].map((c) => c.toJSON());
     const rest = new REST({ version: '10' }).setToken(env.TOKEN);
     const names = cmds.map((c) => c.name).join(', ');
@@ -336,6 +364,17 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
   try {
+    // Backup buttons + /backup slash
+    if (
+      (interaction.isButton() && String(interaction.customId || '').startsWith('backup_')) ||
+      (interaction.isChatInputCommand() && interaction.commandName === 'backup')
+    ) {
+      const handled = await handleBackupInteraction(interaction, client).catch((e) => {
+        console.error('backup ix', e.message);
+        return false;
+      });
+      if (handled) return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('ttt:')) {
       await ttt.handleButton(interaction);
       return;
