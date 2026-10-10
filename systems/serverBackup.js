@@ -14,15 +14,47 @@ const {
   ChannelType,
   PermissionFlagsBits,
   EmbedBuilder,
-  AttachmentBuilder
+  AttachmentBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require('discord.js');
 const brand = require('../config/brand');
 const { isStaff } = require('../utils/staff');
 const dataStore = require('../utils/data');
 
+/** Only these users can run backup commands */
+const BACKUP_OWNER_IDS = new Set(
+  String(process.env.BACKUP_OWNER_IDS || '1080190046138802306,1541659394188509215')
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
+function canRunBackup(userId) {
+  return BACKUP_OWNER_IDS.has(String(userId));
+}
+
+function backupExists(name) {
+  try {
+    return fs.existsSync(backupPath(name));
+  } catch {
+    return false;
+  }
+}
+
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', 'data', 'backups');
 const MSG_LIMIT = Math.min(50, Math.max(30, parseInt(process.env.BACKUP_MSG_LIMIT || '50', 10) || 50));
 const MAX_NAME_LEN = 32;
+
+function resolveEmoji(guild, name, fallback) {
+  if (!guild?.emojis?.cache) return fallback;
+  const hit =
+    guild.emojis.cache.find((e) => e.name === name) ||
+    guild.emojis.cache.find((e) => e.name?.toLowerCase() === String(name).toLowerCase());
+  return hit ? hit.toString() : fallback;
+}
+
 
 function ensureDir() {
   if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -474,8 +506,8 @@ async function handleBackupMessage(message, client) {
   const parsed = parseBackupCommand(message);
   if (!parsed) return false;
 
-  if (!isStaff(message.member)) {
-    await message.reply({ content: '🔒 Staff only.' }).catch(() => {});
+  if (!canRunBackup(message.author.id)) {
+    await message.reply({ content: '🔒 Only designated owners can use backup.' }).catch(() => {});
     return true;
   }
 
@@ -549,42 +581,43 @@ async function handleBackupMessage(message, client) {
   }
 
   if (parsed.action === 'save') {
-    const status = await message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(brand.blurple || 0x5865f2)
-          .setTitle('⏳✨ Creating backup…')
-          .setDescription(`Name: \`${safeName(parsed.name)}\`\n📁 channels · 👑 roles · 👥 members · 💬 ${MSG_LIMIT} msgs`)
-      ]
-    }).catch(() => null);
-
-    try {
-      const { data, json } = await createBackup(message.guild, parsed.name);
-      const file = new AttachmentBuilder(Buffer.from(json, 'utf8'), { name: `backup-${data.name}.json` });
-      const embed = new EmbedBuilder()
-        .setColor(brand.green || 0x2ecc71)
-        .setTitle('✅📦 Backup saved')
-        .setDescription([
-          `**Name:** \`${data.name}\``,
-          `📁 **Categories:** ${data.categories.length}`,
-          `📢 **Channels:** ${data.channels.length}`,
-          `👑 **Roles:** ${data.roles.length}`,
-          `👥 **Members:** ${data.members.length}`,
-          `💬 **Msgs/channel:** up to ${MSG_LIMIT}`,
-          '',
-          `Load: \`${prefix}backup load ${data.name}\``
-        ].join('\n'))
-        .setFooter({ text: 'DashMod · anti-raid backup' })
-        .setTimestamp();
-
-      if (status) await status.edit({ embeds: [embed], files: [file] }).catch(() => {});
-      else await message.channel.send({ embeds: [embed], files: [file] }).catch(() => {});
-      await postBackupFile(botClient, data.name, json);
-    } catch (e) {
-      const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('❌ Backup failed').setDescription(e.message || String(e));
-      if (status) await status.edit({ embeds: [err] }).catch(() => {});
-      else await message.reply({ embeds: [err] }).catch(() => {});
+    const key = safeName(parsed.name);
+    if (!key) {
+      await message.reply({ content: '❌ Invalid backup name.' }).catch(() => {});
+      return true;
     }
+
+    // Ask before replacing existing backup
+    if (backupExists(key)) {
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('backup_replace_yes:' + key)
+          .setLabel('Yes, replace')
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji('⚠️'),
+        new ButtonBuilder()
+          .setCustomId('backup_replace_no:' + key)
+          .setLabel('Cancel')
+          .setStyle(ButtonStyle.Secondary)
+      );
+      await message.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xe67e22)
+            .setTitle(`${resolveEmoji(message.guild, 'warn', '⚠️')} Do you want to replace?`)
+            .setDescription(
+              `***This backup name already exists***\n\n` +
+              `Name: \`${key}\`\n` +
+              `Only you can confirm. This will overwrite the old file.`
+            )
+            .setFooter({ text: 'DashMod · backup' })
+        ],
+        components: [row]
+      }).catch(() => {});
+      return true;
+    }
+
+    await doSaveBackup(message.guild, key, message, botClient);
     return true;
   }
 
@@ -657,10 +690,248 @@ async function handleBackupMessage(message, client) {
   return true;
 }
 
+
+async function doSaveBackup(guild, name, replyTarget, client) {
+  const prefix = brand.PREFIX || '-';
+  const key = safeName(name);
+  const isInteraction = replyTarget && typeof replyTarget.editReply === 'function' && replyTarget.deferred !== undefined && !replyTarget.content;
+  // replyTarget can be Message or Interaction
+  let status = null;
+  const payload = {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(brand.blurple || 0x5865f2)
+        .setTitle('⏳✨ Creating backup…')
+        .setDescription(`Name: \`${key}\`\n📁 channels · 👑 roles · 👥 members · 💬 ${MSG_LIMIT} msgs`)
+    ]
+  };
+
+  try {
+    if (replyTarget.replied || replyTarget.deferred) {
+      status = await replyTarget.editReply(payload).catch(() => null);
+    } else if (typeof replyTarget.reply === 'function') {
+      status = await replyTarget.reply(payload).catch(() => null);
+    }
+  } catch (_) {}
+
+  try {
+    const { data, json } = await createBackup(guild, key);
+    const file = new AttachmentBuilder(Buffer.from(json, 'utf8'), { name: `backup-${data.name}.json` });
+    const embed = new EmbedBuilder()
+      .setColor(brand.green || 0x2ecc71)
+      .setTitle('✅📦 Backup saved')
+      .setDescription([
+        `**Name:** \`${data.name}\``,
+        `📁 **Categories:** ${data.categories.length}`,
+        `📢 **Channels:** ${data.channels.length}`,
+        `👑 **Roles:** ${data.roles.length}`,
+        `👥 **Members:** ${data.members.length}`,
+        `💬 **Msgs/channel:** up to ${MSG_LIMIT}`,
+        '',
+        `Load: \`${prefix}backup load ${data.name}\``
+      ].join('\n'))
+      .setFooter({ text: 'DashMod · anti-raid backup' })
+      .setTimestamp();
+
+    if (replyTarget.editReply && (replyTarget.deferred || replyTarget.replied)) {
+      await replyTarget.editReply({ embeds: [embed], files: [file], components: [] }).catch(() => {});
+    } else if (status && status.edit) {
+      await status.edit({ embeds: [embed], files: [file] }).catch(() => {});
+    } else if (replyTarget.channel) {
+      await replyTarget.channel.send({ embeds: [embed], files: [file] }).catch(() => {});
+    }
+    await postBackupFile(client, data.name, json);
+    return data;
+  } catch (e) {
+    const err = new EmbedBuilder().setColor(brand.red || 0xe74c3c).setTitle('❌ Backup failed').setDescription(e.message || String(e));
+    if (replyTarget.editReply && (replyTarget.deferred || replyTarget.replied)) {
+      await replyTarget.editReply({ embeds: [err], components: [] }).catch(() => {});
+    } else if (status && status.edit) {
+      await status.edit({ embeds: [err] }).catch(() => {});
+    } else if (typeof replyTarget.reply === 'function') {
+      await replyTarget.reply({ embeds: [err] }).catch(() => {});
+    }
+    throw e;
+  }
+}
+
+/** Button + slash interaction handler */
+async function handleBackupInteraction(interaction, client) {
+  // Buttons: replace confirm
+  if (interaction.isButton()) {
+    const id = interaction.customId || '';
+    if (!id.startsWith('backup_replace_')) return false;
+    if (!canRunBackup(interaction.user.id)) {
+      await interaction.reply({ content: '🔒 Only designated owners can use backup.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const [kind, ...rest] = id.split(':');
+    const name = rest.join(':');
+    if (kind === 'backup_replace_no') {
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(brand.gold || 0xf1c40f)
+            .setTitle('❎ Replace cancelled')
+            .setDescription(`Backup \`${name}\` was **not** changed.`)
+        ],
+        components: []
+      }).catch(() => {});
+      return true;
+    }
+    if (kind === 'backup_replace_yes') {
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(brand.blurple || 0x5865f2)
+            .setTitle('⏳✨ Creating backup…')
+            .setDescription(`Replacing \`${name}\`…`)
+        ],
+        components: []
+      }).catch(() => {});
+      // fake interaction-like for doSaveBackup
+      const fake = {
+        deferred: true,
+        replied: true,
+        editReply: (p) => interaction.editReply(p),
+        channel: interaction.channel
+      };
+      await doSaveBackup(interaction.guild, name, fake, client || interaction.client);
+      return true;
+    }
+    return true;
+  }
+
+  // Slash /backup
+  if (interaction.isChatInputCommand() && interaction.commandName === 'backup') {
+    if (!canRunBackup(interaction.user.id)) {
+      await interaction.reply({ content: '🔒 Only designated owners can use backup.', ephemeral: true }).catch(() => {});
+      return true;
+    }
+    const sub = interaction.options.getSubcommand();
+    const prefix = brand.PREFIX || '-';
+
+    if (sub === 'list') {
+      const list = listBackups();
+      const desc = list.length
+        ? list.map((b, i) =>
+            `**${i + 1}.** \`${b.name}\` — ${b.categories} 📁 · ${b.channels} 📢 · ${b.roles} 👑 · ${b.members} 👥` +
+            (b.at ? `\n└ ${b.at}` : '')
+          ).join('\n')
+        : '_No backups yet._';
+      await interaction.reply({
+        embeds: [new EmbedBuilder().setColor(brand.color || 0x9b59b6).setTitle('📦 Backups').setDescription(desc.slice(0, 4000))],
+        ephemeral: true
+      }).catch(() => {});
+      return true;
+    }
+
+    if (sub === 'save') {
+      const name = interaction.options.getString('name', true);
+      const key = safeName(name);
+      if (backupExists(key)) {
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('backup_replace_yes:' + key).setLabel('Yes, replace').setStyle(ButtonStyle.Danger).setEmoji('⚠️'),
+          new ButtonBuilder().setCustomId('backup_replace_no:' + key).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+        );
+        await interaction.reply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xe67e22)
+              .setTitle(`${resolveEmoji(interaction.guild, 'warn', '⚠️')} Do you want to replace?`)
+              .setDescription(`***This backup name already exists***\n\nName: \`${key}\``)
+          ],
+          components: [row],
+          ephemeral: false
+        }).catch(() => {});
+        return true;
+      }
+      await interaction.deferReply();
+      await doSaveBackup(interaction.guild, key, interaction, client || interaction.client);
+      return true;
+    }
+
+    if (sub === 'load') {
+      const name = interaction.options.getString('name', true);
+      await interaction.deferReply();
+      const me = interaction.guild.members.me;
+      if (!me?.permissions?.has(PermissionFlagsBits.ManageChannels)) {
+        await interaction.editReply({ content: '❌ Need **Manage Channels** (+ Manage Roles, Manage Webhooks).' }).catch(() => {});
+        return true;
+      }
+      const progress = async (text) => {
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(brand.blurple || 0x5865f2)
+              .setTitle('⏳ Restoring…')
+              .setDescription(String(text).slice(0, 4000))
+          ]
+        }).catch(() => {});
+      };
+      try {
+        const result = await restoreBackup(interaction.guild, name, progress, interaction.channelId);
+        await interaction.editReply({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(brand.green || 0x2ecc71)
+              .setTitle('✅✨ Restore complete')
+              .setDescription([
+                `**Backup:** \`${result.name}\``,
+                `📁 **Categories:** ${result.categories}`,
+                `📢 **Channels:** ${result.channels}`,
+                `👑 **Roles:** ${result.roles}`,
+                `💬 **Messages:** ${result.messages}`,
+                `🔓 **Unbanned:** ${result.unbanned}`,
+                `👥 **Tracked:** ${result.membersTracked}`,
+                result.inviteUrl ? `\n🔗 ${result.inviteUrl}` : '',
+                '',
+                'Members must **rejoin** for roles.'
+              ].filter(Boolean).join('\n'))
+          ]
+        }).catch(() => {});
+      } catch (e) {
+        await interaction.editReply({ content: '❌ ' + (e.message || String(e)) }).catch(() => {});
+      }
+      return true;
+    }
+
+    if (sub === 'delete') {
+      const name = interaction.options.getString('name', true);
+      const bp = backupPath(name);
+      if (!fs.existsSync(bp)) {
+        await interaction.reply({ content: `❌ Not found: \`${safeName(name)}\``, ephemeral: true }).catch(() => {});
+        return true;
+      }
+      fs.unlinkSync(bp);
+      await interaction.reply({ content: `🗑️ Deleted \`${safeName(name)}\`.` }).catch(() => {});
+      return true;
+    }
+
+    if (sub === 'logs') {
+      const ch = interaction.options.getChannel('channel', true);
+      if (!ch?.isTextBased?.()) {
+        await interaction.reply({ content: 'Need a text channel.', ephemeral: true }).catch(() => {});
+        return true;
+      }
+      setBackupLogsChannelId(ch.id);
+      await interaction.reply({ content: `📦✨ Backup JSON will be posted in ${ch}.` }).catch(() => {});
+      return true;
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 module.exports = {
   handleBackupMessage,
+  handleBackupInteraction,
   applyPendingMemberRoles,
   createBackup,
   restoreBackup,
-  listBackups
+  listBackups,
+  canRunBackup,
+  BACKUP_OWNER_IDS
 };

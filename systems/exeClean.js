@@ -1,12 +1,21 @@
 /**
- * -exe  — local email:pass cleaner (NO login checks)
- * Filters weak passwords + junk emails, strips noise, adds DashMod header.
+ * -check  — DashMod utility (local email:pass filter, NO login checks)
+ * Aliases: -exe -clean -filter
  */
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const brand = require('../config/brand');
 
-const CMD = new Set(['exe', 'clean', 'filter']);
-const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15MB
+const CMD = new Set(['check', 'exe', 'clean', 'filter']);
+const MAX_FILE_BYTES = 15 * 1024 * 1024;
+
+/** Resolve :name: from guild custom emoji, else unicode fallback */
+function em(guild, name, fallback) {
+  if (!guild?.emojis?.cache) return fallback;
+  const hit =
+    guild.emojis.cache.find((e) => e.name === name) ||
+    guild.emojis.cache.find((e) => e.name?.toLowerCase() === String(name).toLowerCase());
+  return hit ? hit.toString() : fallback;
+}
 
 const TRASH_PASS = new Set([
   '12345678', '123456789', '1234567890', '0123456789',
@@ -71,30 +80,16 @@ function filterCombos(combos) {
   let removedFormat = 0;
   let removedEmail = 0;
   let removedPass = 0;
-
   for (const c of combos) {
     const email = c.email;
     const pass = c.pass;
     const at = email.lastIndexOf('@');
-    if (at < 1) {
-      removedFormat++;
-      continue;
-    }
+    if (at < 1) { removedFormat++; continue; }
     const local = email.slice(0, at);
     const domain = email.slice(at + 1);
-
-    if (!domain.includes('.') || local.length < 2) {
-      removedFormat++;
-      continue;
-    }
-    if (looksRandomLocal(local)) {
-      removedEmail++;
-      continue;
-    }
-    if (isWeakPassword(pass)) {
-      removedPass++;
-      continue;
-    }
+    if (!domain.includes('.') || local.length < 2) { removedFormat++; continue; }
+    if (looksRandomLocal(local)) { removedEmail++; continue; }
+    if (isWeakPassword(pass)) { removedPass++; continue; }
     kept.push({ email, pass });
   }
   return { kept, removedFormat, removedEmail, removedPass };
@@ -117,14 +112,11 @@ function buildBody(kept) {
 
 async function readAttachmentText(attachment) {
   if (!attachment) return { error: 'no_file' };
-  if (attachment.size > MAX_FILE_BYTES) {
-    return { error: 'too_big', size: attachment.size };
-  }
+  if (attachment.size > MAX_FILE_BYTES) return { error: 'too_big', size: attachment.size };
   try {
     const res = await fetch(attachment.url);
     if (!res.ok) return { error: 'fetch_fail' };
-    const text = await res.text();
-    return { text };
+    return { text: await res.text() };
   } catch {
     return { error: 'fetch_fail' };
   }
@@ -139,6 +131,14 @@ async function handleExeMessage(message) {
   const parts = raw.split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   if (!CMD.has(cmd)) return false;
+
+  const g = message.guild;
+  const broom = em(g, 'broom', '🧹');
+  const warn = em(g, 'warn', '⚠️');
+  const ok = em(g, 'success', '✅');
+  const inbox = em(g, 'inbox', '📥');
+  const trash = em(g, 'trash', '🗑️');
+  const sparkle = em(g, 'sparkle', '✨');
 
   const rest = parts.slice(1).join(' ').trim();
   let sourceText = rest;
@@ -158,9 +158,8 @@ async function handleExeMessage(message) {
       }) || message.attachments.first();
 
     const result = await readAttachmentText(att);
-    if (result.text) {
-      sourceText = (sourceText ? sourceText + '\n' : '') + result.text;
-    } else {
+    if (result.text) sourceText = (sourceText ? sourceText + '\n' : '') + result.text;
+    else {
       fileError = result.error;
       if (result.size) fileError = 'too_big:' + result.size;
     }
@@ -175,13 +174,13 @@ async function handleExeMessage(message) {
         embeds: [
           new EmbedBuilder()
             .setColor(brand.red || 0xe74c3c)
-            .setTitle('🧹 exe · file error')
+            .setTitle(`${warn} DashMod utility · file`)
             .setDescription(
               mb
                 ? `File is **${mb} MB**. Max is **15 MB**.\nSplit the file and try again.`
                 : 'Could not read the attachment. Use a `.txt` file.'
             )
-            .setFooter({ text: 'Powered by Ultimate Rewards' })
+            .setFooter({ text: 'DashMod utility · Ultimate Rewards' })
         ]
       })
       .catch(() => {});
@@ -194,22 +193,21 @@ async function handleExeMessage(message) {
         embeds: [
           new EmbedBuilder()
             .setColor(brand.gold || 0xf1c40f)
-            .setTitle('🧹 exe · cleaner')
+            .setTitle(`${broom} DashMod utility`)
             .setDescription(
               [
-                `Usage: \`${prefix}exe email:pass\``,
-                `Or: \`${prefix}exe\` + attach a \`.txt\` file`,
+                `Usage: \`${prefix}check email:pass\``,
+                `Or: \`${prefix}check\` + attach a \`.txt\` file`,
                 'Multiple `email:pass` lines supported.'
               ].join('\n')
             )
-            .setFooter({ text: 'Powered by Ultimate Rewards' })
+            .setFooter({ text: 'DashMod utility · Ultimate Rewards' })
         ]
       })
       .catch(() => {});
     return true;
   }
 
-  // Big files: show processing
   let statusMsg = null;
   if (sourceText.length > 200000) {
     statusMsg = await message
@@ -217,8 +215,8 @@ async function handleExeMessage(message) {
         embeds: [
           new EmbedBuilder()
             .setColor(brand.blurple || 0x5865f2)
-            .setTitle('⏳ Processing...')
-            .setDescription('Large file detected. Cleaning now, please wait…')
+            .setTitle(`${broom} Processing…`)
+            .setDescription('Large file detected. Working now, please wait…')
         ]
       })
       .catch(() => null);
@@ -235,19 +233,21 @@ async function handleExeMessage(message) {
 
   const embed = new EmbedBuilder()
     .setColor(brand.green || 0x2ecc71)
-    .setTitle('✨ DashMod · exe clean')
+    .setTitle(`${sparkle} DashMod utility`)
     .setDescription(
       [
-        `**📥 Checked** : **${combos.length}**`,
-        `**🗑️ Removed** : **${removedTotal}**`,
-        `**✅ Kept** : **${kept.length}**`,
+        `**${inbox} Checked** : **${combos.length}**`,
+        `**${trash} Removed** : **${removedTotal}**`,
+        `**${ok} Kept** : **${kept.length}**`,
         '',
         `• Weak / short pass → **${removedPass}**`,
         `• Junk-looking email → **${removedEmail}**`,
-        `• Bad format → **${removedFormat}**`
+        `• Bad format → **${removedFormat}**`,
+        '',
+        `***${em(g, 'cry', '😢')} maybe... I fill fake information***`
       ].join('\n')
     )
-    .setFooter({ text: 'Powered by Ultimate Rewards · DashMod' })
+    .setFooter({ text: 'DashMod utility · Ultimate Rewards' })
     .setTimestamp();
 
   const useFile =
