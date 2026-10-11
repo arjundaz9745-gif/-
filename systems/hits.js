@@ -11,13 +11,18 @@ const { em } = require('./stocks');
 
 const DEFAULT_IGN = 'DashWho';
 
+const crypto = require('crypto');
+
+/** Deterministic "random" skin id from email (always valid render) */
+function skinIdFromEmail(email) {
+  return crypto
+    .createHash('md5')
+    .update(String(email || Math.random()) + String(Date.now() % 7))
+    .digest('hex');
+}
+
 function randomSkinId() {
-  // random UUID → whatever skin that account has (or default Steve/Alex)
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return crypto.randomBytes(16).toString('hex');
 }
 
 
@@ -135,7 +140,7 @@ function makeRecord(acc, type, meta = {}) {
   const hasName = !!(acc.username && String(acc.username).trim());
   const st = luckStatus(type);
   const displayName = hasName ? String(acc.username).trim() : DEFAULT_IGN;
-  const skinId = hasName ? displayName : randomSkinId();
+  const skinId = hasName ? displayName : skinIdFromEmail(acc.email);
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     email: acc.email,
@@ -185,22 +190,22 @@ function countAll() {
   return o;
 }
 
+function bareId(idOrName) {
+  const id = String(idOrName || 'Steve');
+  if (/^[0-9a-f]{32}$/i.test(id)) return id.toLowerCase();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id)) return id.replace(/-/g, '').toLowerCase();
+  return encodeURIComponent(id);
+}
+
+/** Discord-friendly skin renders (minotar + mc-heads always return an image) */
 function skinUrl(idOrName) {
-  const id = String(idOrName || DEFAULT_IGN);
-  // UUID → crafatar body; name → mc-heads
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) || /^[0-9a-f]{32}$/i.test(id)) {
-    const bare = id.replace(/-/g, '');
-    return 'https://crafatar.com/renders/body/' + bare + '?overlay=true&scale=10';
-  }
-  return 'https://mc-heads.net/body/' + encodeURIComponent(id) + '/180';
+  const id = bareId(idOrName);
+  // Full body armor — reliable in Discord embeds
+  return 'https://minotar.net/armor/body/' + id + '/180.png';
 }
 function avatarUrl(idOrName) {
-  const id = String(idOrName || DEFAULT_IGN);
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) || /^[0-9a-f]{32}$/i.test(id)) {
-    const bare = id.replace(/-/g, '');
-    return 'https://crafatar.com/avatars/' + bare + '?overlay=true&size=128';
-  }
-  return 'https://mc-heads.net/avatar/' + encodeURIComponent(id) + '/128';
+  const id = bareId(idOrName);
+  return 'https://minotar.net/helm/' + id + '/128.png';
 }
 function skinForHit(hit) {
   return hit.skinId || hit.name || randomSkinId();
