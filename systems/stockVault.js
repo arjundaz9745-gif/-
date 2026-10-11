@@ -15,8 +15,34 @@ const OWNERS = new Set(
     .filter(Boolean)
 );
 
-const FREE_SERVICES = ['mcnfa', 'mcfa', 'donut', 'hypixel'];
-const PREMIUM_SERVICES = ['mcnfa', 'mcfa', 'donut', 'hypixel'];
+const DEFAULT_SERVICES = ['mcnfa', 'mcfa', 'donut', 'hypixel'];
+
+function getServices(tier) {
+  const d = dataStore.get();
+  if (!d.vaultServices) d.vaultServices = { free: [...DEFAULT_SERVICES], premium: [...DEFAULT_SERVICES] };
+  const list = d.vaultServices[tier === 'premium' ? 'premium' : 'free'];
+  return Array.isArray(list) && list.length ? list.map((s) => String(s).toLowerCase()) : [...DEFAULT_SERVICES];
+}
+
+function addService(tier, name, emojiName) {
+  const d = dataStore.get();
+  if (!d.vaultServices) d.vaultServices = { free: [...DEFAULT_SERVICES], premium: [...DEFAULT_SERVICES] };
+  const key = tier === 'premium' ? 'premium' : 'free';
+  const n = String(name || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+  if (!n) return { ok: false, error: 'bad name' };
+  if (!d.vaultServices[key].includes(n)) d.vaultServices[key].push(n);
+  if (!d.serviceEmojis) d.serviceEmojis = {};
+  if (emojiName) d.serviceEmojis[n] = String(emojiName).replace(/^:|:$/g, '');
+  dataStore.save();
+  return { ok: true, services: d.vaultServices, emojis: d.serviceEmojis };
+}
+
+function listServiceEmojis() {
+  return dataStore.get().serviceEmojis || {};
+}
+
+const FREE_SERVICES = DEFAULT_SERVICES;
+const PREMIUM_SERVICES = DEFAULT_SERVICES;
 
 function stockDir() {
   const base = process.env.STOCK_DIR || path.join(__dirname, '..', 'stockdata');
@@ -64,7 +90,7 @@ function takeStock(tier, service) {
 }
 
 function counts(tier) {
-  const services = tier === 'premium' ? PREMIUM_SERVICES : FREE_SERVICES;
+  const services = getServices(tier);
   const o = {};
   for (const s of services) o[s] = readStock(tier, s).length;
   return o;
@@ -78,7 +104,9 @@ function isStockStaff(member) {
 
 /** Resolve :servicename: from guild (animated OK) */
 function icon(guild, name) {
-  return em(guild, name, `:${name}:`);
+  const map = listServiceEmojis();
+  const en = map[name] || name;
+  return em(guild, en, `:${en}:`);
 }
 
 function vaultEmbed(tier, guild) {
@@ -270,6 +298,10 @@ function registerLegitPending(messageId, data) {
 }
 
 module.exports = {
+  getServices,
+  addService,
+  listServiceEmojis,
+  DEFAULT_SERVICES,
   registerLegitPending,
   handleStockCommands,
   handleLegitReply,
