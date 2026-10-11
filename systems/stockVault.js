@@ -1,8 +1,12 @@
+/**
+ * Free / Premium vault — stock files + :servicename: server emojis
+ */
 const fs = require('fs');
 const path = require('path');
 const dataStore = require('../utils/data');
 const brand = require('../config/brand');
 const { E } = require('../utils/embeds');
+const { em } = require('./stocks');
 
 const STAFF_ROLE = process.env.STOCK_STAFF_ROLE || '1548173330794815599';
 const OWNERS = new Set(
@@ -15,7 +19,6 @@ const FREE_SERVICES = ['mcnfa', 'mcfa', 'donut', 'hypixel'];
 const PREMIUM_SERVICES = ['mcnfa', 'mcfa', 'donut', 'hypixel'];
 
 function stockDir() {
-  // Prefer project folder; on Render free this resets unless persistent disk
   const base = process.env.STOCK_DIR || path.join(__dirname, '..', 'stockdata');
   try {
     fs.mkdirSync(base, { recursive: true });
@@ -73,15 +76,22 @@ function isStockStaff(member) {
   return member.roles?.cache?.has(STAFF_ROLE);
 }
 
-function vaultEmbed(tier) {
-  const c = counts(tier);
-  const title = tier === 'premium' ? '💎 PREMIUM VAULT' : '🆓 FREE VAULT';
-  const note = tier === 'premium' ? '(permanent stock files)' : '';
-  const lines = Object.entries(c).map(([s, n]) => `• **${s}** → \`${n}\``);
-  return E(title, lines.join('\n') + `\n${note}\n\`-${tier} <service>\``, brand.color);
+/** Resolve :servicename: from guild (animated OK) */
+function icon(guild, name) {
+  return em(guild, name, `:${name}:`);
 }
 
-/** Pending legit confirmations: messageId -> { staffId, customerId, item, channelId } */
+function vaultEmbed(tier, guild) {
+  const c = counts(tier);
+  const title =
+    tier === 'premium'
+      ? `${icon(guild, 'premium')} PREMIUM VAULT`
+      : `${icon(guild, 'free')} FREE VAULT`;
+  const note = tier === 'premium' ? '(permanent stock files)' : '';
+  const lines = Object.entries(c).map(([s, n]) => `${icon(guild, s)} **${s}** → \`${n}\``);
+  return E(title, `${lines.join('\n')}\n${note}\n\`-${tier} <service>\``, brand.color);
+}
+
 const pendingLegit = new Map();
 
 async function handleStockCommands(message) {
@@ -90,33 +100,62 @@ async function handleStockCommands(message) {
   if (!message.content.startsWith(P)) return false;
   const args = message.content.slice(P.length).trim().split(/\s+/);
   const cmd = (args.shift() || '').toLowerCase();
+  const g = message.guild;
+
+  if (cmd === 'stock' || cmd === 'fstock' || cmd === 'pstock') {
+    if (cmd === 'fstock') {
+      await message.reply({ embeds: [vaultEmbed('free', g)] });
+      return true;
+    }
+    if (cmd === 'pstock') {
+      await message.reply({ embeds: [vaultEmbed('premium', g)] });
+      return true;
+    }
+    const free = counts('free');
+    const prem = counts('premium');
+    const fl =
+      Object.entries(free)
+        .map(([s, n]) => `${icon(g, s)} **${s}** → \`${n}\``)
+        .join('\n') || '_empty_';
+    const pl =
+      Object.entries(prem)
+        .map(([s, n]) => `${icon(g, s)} **${s}** → \`${n}\``)
+        .join('\n') || '_empty_';
+    await message.reply({
+      embeds: [
+        E(
+          `${icon(g, 'stock')} Stock`,
+          `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}\n\n\`-free <service>\` · \`-premium <service>\`\n\`-fadd / -padd <service> email:pass\``,
+          brand.color
+        )
+      ]
+    });
+    return true;
+  }
 
   if (cmd === 'free' || cmd === 'premium') {
     const tier = cmd;
     const service = (args[0] || '').toLowerCase();
     if (!service) {
-      await message.reply({ embeds: [vaultEmbed(tier)] });
+      await message.reply({ embeds: [vaultEmbed(tier, g)] });
       return true;
     }
     if (!isStockStaff(message.member)) {
       await message.reply({ embeds: [E('Vault', 'Staff only.', brand.red)] });
       return true;
     }
-    if (args[0]?.toLowerCase() === 'add' || args[1]) {
-      // -free add mcfa email:pass...  OR -free mcfa add ...
-    }
-    // deliver
     const item = takeStock(tier, service);
     if (!item) {
-      await message.reply({ embeds: [E('Vault', `No stock for **${service}**.`, brand.red)] });
+      await message.reply({
+        embeds: [E('Vault', `${icon(g, service)} **${service}** is empty.`, brand.red)]
+      });
       return true;
     }
     const reply = await message.reply({
       content:
-        `||${item}||\n\n# ARE WE LEGIT?\n` +
+        `${icon(g, service)} **${service}**\n||${item}||\n\n# ARE WE LEGIT?\n` +
         `Reply **yes** / **yeah** / **yep** or **no** / **nope**`
     });
-    // try find ticket opener / mentioned user
     const customer =
       message.mentions.users.first()?.id ||
       message.channel.topic?.match(/\d{17,20}/)?.[0] ||
@@ -131,40 +170,23 @@ async function handleStockCommands(message) {
     return true;
   }
 
-  // -free add mcfa email:pass
   if ((cmd === 'fadd' || cmd === 'padd') && isStockStaff(message.member)) {
     const tier = cmd === 'fadd' ? 'free' : 'premium';
     const service = (args.shift() || '').toLowerCase();
     const combos = args.filter((a) => a.includes(':'));
     if (!service || !combos.length) {
-      await message.reply({ embeds: [E('Vault', `\`-${cmd} <service> email:pass ...\``, brand.gold)] });
+      await message.reply({
+        embeds: [E('Vault', `\`-${cmd} <service> email:pass ...\``, brand.gold)]
+      });
       return true;
     }
     const n = addStock(tier, service, combos);
-    await message.reply({ embeds: [E('Vault', `Added **${n}** to **${tier}/${service}**`, brand.green)] });
-    return true;
-  }
-
-  if (cmd === 'stock' || cmd === 'fstock' || cmd === 'pstock') {
-    if (cmd === 'fstock') {
-      await message.reply({ embeds: [vaultEmbed('free')] });
-      return true;
-    }
-    if (cmd === 'pstock') {
-      await message.reply({ embeds: [vaultEmbed('premium')] });
-      return true;
-    }
-    // -stock → both vaults
-    const free = counts('free');
-    const prem = counts('premium');
-    const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
-    const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
     await message.reply({
       embeds: [
         E(
-          '📦 Stock',
-          `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}\n\n\`-free <service>\` · \`-premium <service>\`\n\`-fadd / -padd <service> email:pass\``,
-          brand.color
+          'Vault',
+          `${icon(g, service)} Added **${n}** → **${tier}/${service}**`,
+          brand.green
         )
       ]
     });
@@ -179,20 +201,15 @@ const NO = /^(no|nope|nah|not|false)$/i;
 
 async function handleLegitReply(message) {
   if (message.author.bot) return false;
-  // reply to bot's ARE WE LEGIT message
   const ref = message.reference?.messageId;
   if (!ref) return false;
   const pend = pendingLegit.get(ref);
   if (!pend || Date.now() > pend.expires) return false;
-  if (message.author.id !== pend.staffId && message.author.id !== pend.customerId) {
-    // allow customer or staff
-  }
   const t = message.content.trim();
   if (YES.test(t)) {
     pendingLegit.delete(ref);
     const who = pend.customerId ? `<@${pend.customerId}>` : 'customer';
     await message.channel.send(`-# PLEASE VOUCH ${who}`).catch(() => {});
-    // listen one vouch is handled separately via onVouch
     message.client._pendingVouch = message.client._pendingVouch || new Map();
     message.client._pendingVouch.set(message.channel.id, {
       staffId: pend.staffId,
@@ -222,14 +239,12 @@ async function handleVouchMessage(message) {
   if (!/legit/i.test(message.content)) return false;
   map.delete(message.channel.id);
   const staff = `<@${pend.staffId}>`;
-  const text = `Legit got **${pend.item}** from ${staff}`;
-  // announce in this channel
   await message.channel
     .send(
-      `${pend.customerId ? `<@${pend.customerId}>` : 'Customer'}, Thank you for using our service ❤️\n${text}`
+      `${pend.customerId ? `<@${pend.customerId}>` : 'Customer'}, Thank you for using our service ❤️\n` +
+        `Legit got **${pend.item}** from ${staff}`
     )
     .catch(() => {});
-  // optional: record payout for events
   try {
     const { listActive, markPayout } = require('./events');
     for (const ev of listActive(message.guild.id)) markPayout(ev.id, pend.staffId);

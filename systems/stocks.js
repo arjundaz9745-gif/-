@@ -1,11 +1,11 @@
 /** Paid / normal stock (not gen) — emoji names must exist on the server */
 const STOCK_META = {
-  mcfa: { emoji: 'minecraft', label: 'MCFA', fallback: '⚔️' },
-  mcnfa: { emoji: 'minecraft', label: 'MCNFA', fallback: '⛏️' },
-  minecraft: { emoji: 'minecraft', label: 'Minecraft', fallback: '⛏️' },
-  hypixel: { emoji: 'hypixel', label: 'Hypixel', fallback: '🎮' },
-  xbox: { emoji: 'xbox', label: 'Xbox', fallback: '🎯' },
-  xbox_code: { emoji: 'xbox', label: 'Xbox Code', fallback: '🎯' },
+  mcfa: { emoji: 'mcfa', label: 'MCFA', fallback: ':mcfa:' },
+  mcnfa: { emoji: 'mcnfa', label: 'MCNFA', fallback: ':mcnfa:' },
+  minecraft: { emoji: 'minecraft', label: 'Minecraft', fallback: ':minecraft:' },
+  hypixel: { emoji: 'hypixel', label: 'Hypixel', fallback: ':hypixel:' },
+  xbox: { emoji: 'xbox', label: 'Xbox', fallback: ':xbox:' },
+  xbox_code: { emoji: 'xbox', label: 'Xbox Code', fallback: ':xbox:' },
   netflix: { emoji: 'netflix', label: 'Netflix', fallback: '📺' },
   crunchyroll: { emoji: 'crunchyroll', label: 'Crunchyroll', fallback: '🍿' },
   spotify: { emoji: 'spotify', label: 'Spotify', fallback: '🎧' },
@@ -31,9 +31,13 @@ const METHOD_META = {
 };
 
 function em(guild, name, fallback) {
-  if (!guild?.emojis?.cache) return fallback || '✨';
-  const f = guild.emojis.cache.find((e) => e.name.toLowerCase() === String(name).toLowerCase());
-  return f ? f.toString() : fallback || '✨';
+  if (!guild?.emojis?.cache) return fallback || `:${name}:`;
+  const n = String(name || '').toLowerCase().replace(/^:|:$/g, '');
+  // exact name match (animated or static)
+  let f = guild.emojis.cache.find((e) => e.name.toLowerCase() === n);
+  if (!f) f = guild.emojis.cache.find((e) => e.name.toLowerCase().replace(/_/g, '') === n.replace(/_/g, ''));
+  if (f) return f.toString(); // renders animated if animated emoji
+  return fallback || `:${n}:`;
 }
 
 function brandEmojis(guild) {
