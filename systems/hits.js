@@ -1,11 +1,13 @@
 /**
- * Hits poster — styled fields (Wither-like), 5s interval
- * Status from pool type only — no live account checks.
+ * Hits poster — server emojis :hit: :mail: :banned: etc.
+ * Adding mixed/banned/unbanned/xbox/codes = website only (API).
+ * Discord: -hit start | stop | stock
  */
 const { EmbedBuilder } = require('discord.js');
 const dataStore = require('../utils/data');
 const brand = require('../config/brand');
 const { E } = require('../utils/embeds');
+const { em } = require('./stocks');
 
 const DEFAULT_IGN = 'Notch';
 const NOTCH_UUID = '069a79f4-44e9-4726-a5be-f425402f2e10';
@@ -20,11 +22,11 @@ const CHANNELS = {
 };
 
 const HIT_TYPES = {
-  mixed: { key: 'mixed', label: 'Mixed Hits', emoji: '🎯', channel: CHANNELS.mixed },
-  hypixel_banned: { key: 'hypixel_banned', label: 'Hypixel Banned', emoji: '⛔', channel: CHANNELS.hypixel_banned },
-  hypixel_unbanned: { key: 'hypixel_unbanned', label: 'Hypixel Unbanned', emoji: '✅', channel: CHANNELS.hypixel_unbanned },
-  xbox_codes: { key: 'xbox_codes', label: 'Xbox Codes', emoji: '🎫', channel: CHANNELS.xbox_codes },
-  xbox: { key: 'xbox', label: 'Xbox Hits', emoji: '🎮', channel: CHANNELS.xbox }
+  mixed: { key: 'mixed', label: 'Mixed Hits', emojiName: 'mixed', channel: CHANNELS.mixed },
+  hypixel_banned: { key: 'hypixel_banned', label: 'Hypixel Banned', emojiName: 'banned', channel: CHANNELS.hypixel_banned },
+  hypixel_unbanned: { key: 'hypixel_unbanned', label: 'Hypixel Unbanned', emojiName: 'unbanned', channel: CHANNELS.hypixel_unbanned },
+  xbox_codes: { key: 'xbox_codes', label: 'Xbox Codes', emojiName: 'codes', channel: CHANNELS.xbox_codes },
+  xbox: { key: 'xbox', label: 'Xbox Hits', emojiName: 'xbox', channel: CHANNELS.xbox }
 };
 
 const ALIASES = {
@@ -35,24 +37,9 @@ const ALIASES = {
   xbox_codes: 'xbox_codes', codes: 'xbox_codes', xbc: 'xbox_codes'
 };
 
-/** Configurable emoji names → Discord custom or unicode fallback */
-const EM = {
-  mail: process.env.EMOJI_MAIL || '📧',
-  password: process.env.EMOJI_PASSWORD || '🔒',
-  banned: process.env.EMOJI_BANNED || '🚫',
-  unbanned: process.env.EMOJI_UNBANNED || '🟢',
-  hypixel: process.env.EMOJI_HYPIXEL || '🏆',
-  loading: process.env.EMOJI_LOADING || '⏳',
-  coin: process.env.EMOJI_MS_COIN || '🪙',
-  donut: process.env.EMOJI_DONUT || '🍩',
-  capes: process.env.EMOJI_CAPES || '🧥',
-  account: process.env.EMOJI_ACCOUNT || '👤',
-  combo: process.env.EMOJI_COMBO || '📋'
-};
-
-const pendingCapture = new Map();
-let posterClient = null;
-let posterTimer = null;
+function ic(guild, name) {
+  return em(guild, name, `:${name}:`);
+}
 
 function ensure() {
   const d = dataStore.get();
@@ -70,7 +57,7 @@ function resolveType(raw) {
 
 function parseCombo(line) {
   const s = String(line || '').trim();
-  if (!s || s.startsWith('#') || s.startsWith('eyJ')) return null;
+  if (!s || s.startsWith('#')) return null;
   const parts = s.split(':');
   if (parts.length < 2) return null;
   const email = parts[0].trim();
@@ -96,17 +83,6 @@ function extractAccounts(text) {
     }
   }
   return out;
-}
-
-async function fetchTxt(message) {
-  let text = '';
-  for (const att of message.attachments.values()) {
-    if (!/\.txt$/i.test(att.name || '') && !(att.contentType || '').includes('text')) continue;
-    try {
-      text += '\n' + (await (await fetch(att.url)).text());
-    } catch (_) {}
-  }
-  return text;
 }
 
 function statusForType(type) {
@@ -154,6 +130,23 @@ function queueAdd(type, accounts, meta = {}) {
   return n;
 }
 
+/** Website / API: body { type, lines: "email:pass\\n..." or combos: [] } */
+function addFromWebsite(typeRaw, textOrList, meta = {}) {
+  const type = resolveType(typeRaw);
+  if (!type) return { ok: false, error: 'bad type' };
+  let accounts = [];
+  if (Array.isArray(textOrList)) {
+    accounts = textOrList
+      .map((x) => (typeof x === 'string' ? parseCombo(x) : x))
+      .filter(Boolean);
+  } else {
+    accounts = extractAccounts(String(textOrList || ''));
+  }
+  if (!accounts.length) return { ok: false, error: 'no combos' };
+  const n = queueAdd(type, accounts, meta);
+  return { ok: true, added: n, total: ensure().hits[type].length, type };
+}
+
 function countAll() {
   const d = ensure();
   const o = {};
@@ -172,56 +165,57 @@ function avatarUrl(uuid, name) {
   return `https://crafatar.com/avatars/${NOTCH_UUID.replace(/-/g, '')}?overlay=true&size=128`;
 }
 
-function ynLine(status) {
+function ynLine(guild, status) {
   const s = String(status || '').toLowerCase();
-  if (s.includes('unban')) return `${EM.unbanned} Unbanned`;
-  if (s.includes('ban')) return `${EM.banned} Banned`;
-  if (s.includes('mixed')) return `🎯 Mixed`;
+  if (s.includes('unban')) return `${ic(guild, 'unbanned')} Unbanned`;
+  if (s.includes('ban')) return `${ic(guild, 'banned')} Banned`;
+  if (s.includes('mixed')) return `${ic(guild, 'mixed')} Mixed`;
   return 'N/A';
 }
 
-function buildHitEmbed(hit) {
+function buildHitEmbed(hit, guild) {
   const t = HIT_TYPES[hit.type] || HIT_TYPES.mixed;
   const ign = hit.name || DEFAULT_IGN;
   const combo = `${hit.email}:${hit.password}`;
+  const typeIcon = ic(guild, t.emojiName);
 
   const desc = [
-    `### ${ign}`,
+    `### ${ic(guild, 'hit')} ${ign}`,
     '',
-    `${EM.mail} **Email**`,
+    `${ic(guild, 'mail')} **Email**`,
     `||\`\`\`${hit.email}\`\`\`||`,
-    `${EM.password} **Password**`,
+    `${ic(guild, 'password')} **Password**`,
     `||\`\`\`${hit.password}\`\`\`||`,
     '',
-    `${EM.banned} **Hypixel Banned**`,
-    ynLine(hit.hypixel),
-    `${EM.hypixel} **Hypixel Name**`,
+    `${ic(guild, 'banned')} **Hypixel Banned**`,
+    ynLine(guild, hit.hypixel),
+    `${ic(guild, 'hypixel')} **Hypixel Name**`,
     ign,
-    `${EM.loading} **Can Change Name**`,
+    `${ic(guild, 'loading')} **Can Change Name**`,
     hit.canChangeName || 'False',
-    `${EM.coin} **Hypixel Level**`,
+    `${ic(guild, 'ms-coin')} **Hypixel Level**`,
     hit.hypixelLevel || 'N/A',
-    `${EM.hypixel} **Hypixel Karma**`,
+    `${ic(guild, 'hypixel')} **Hypixel Karma**`,
     hit.hypixelKarma || 'N/A',
     '',
-    `${EM.donut} **Donut SMP Banned**`,
-    ynLine(hit.donut),
-    `${EM.donut} **Donut SMP Balance**`,
+    `${ic(guild, 'donut')} **Donut SMP Banned**`,
+    ynLine(guild, hit.donut),
+    `${ic(guild, 'donut')} **Donut SMP Balance**`,
     hit.donutBalance || '$N/A',
-    `${EM.donut} **Donut SMP PlayTime**`,
+    `${ic(guild, 'donut')} **Donut SMP PlayTime**`,
     hit.donutPlaytime || 'N/A',
-    `${EM.donut} **Donut SMP Shards**`,
+    `${ic(guild, 'donut')} **Donut SMP Shards**`,
     hit.donutShards || 'N/A',
-    `${EM.donut} **Donut SMP Kills**`,
+    `${ic(guild, 'donut')} **Donut SMP Kills**`,
     hit.donutKills || 'N/A',
-    `${EM.donut} **Donut SMP Deaths**`,
+    `${ic(guild, 'donut')} **Donut SMP Deaths**`,
     hit.donutDeaths || 'N/A',
     '',
-    `${EM.capes} **Capes**`,
+    `${ic(guild, 'capes')} **Capes**`,
     hit.capes || 'Pan',
-    `${EM.account} **Account Type**`,
+    `${ic(guild, 'account')} **Account Type**`,
     hit.accountType || 'Normal',
-    `${EM.combo} **Combo**`,
+    `${ic(guild, 'combo')} **Combo**`,
     `||\`\`\`${combo}\`\`\`||`,
     '',
     `*${brand.footer || 'Coded by DashWho · Enhanced by DakshBro'}*`
@@ -229,12 +223,15 @@ function buildHitEmbed(hit) {
 
   return new EmbedBuilder()
     .setColor(hit.type === 'hypixel_banned' ? 0xed4245 : hit.type === 'hypixel_unbanned' ? 0x57f287 : 0x5865f2)
-    .setTitle(`${t.emoji} ${t.label}`)
+    .setTitle(`${typeIcon} ${t.label}`)
     .setDescription(desc)
     .setThumbnail(avatarUrl(hit.uuid, ign))
     .setImage(skinUrl(hit.uuid, ign))
     .setTimestamp();
 }
+
+let posterClient = null;
+let posterTimer = null;
 
 async function postOne(client, type) {
   const d = ensure();
@@ -249,7 +246,7 @@ async function postOne(client, type) {
     return false;
   }
   try {
-    await ch.send({ embeds: [buildHitEmbed(hit)] });
+    await ch.send({ embeds: [buildHitEmbed(hit, ch.guild)] });
     return true;
   } catch (e) {
     console.error('[hits]', e.message);
@@ -287,122 +284,81 @@ function stopPoster() {
   }
 }
 
-function stockEmbed() {
+function stockEmbed(guild) {
   const counts = countAll();
-  const run = ensure().hitsRunning ? '🟢 **RUNNING**' : '🔴 **STOPPED**';
+  const run = ensure().hitsRunning ? `${ic(guild, 'unbanned')} **RUNNING**` : `${ic(guild, 'banned')} **STOPPED**`;
   const lines = Object.keys(HIT_TYPES).map((k) => {
     const t = HIT_TYPES[k];
-    return `${t.emoji} **${t.label}** → \`${counts[k]}\` · <#${t.channel}>`;
+    return `${ic(guild, t.emojiName)} **${t.label}** → \`${counts[k]}\` · <#${t.channel}>`;
   });
   return E(
-    '🎯 Hits',
+    `${ic(guild, 'hit')} Hits`,
     `${run} · every **${POST_INTERVAL_MS / 1000}s**\n\n${lines.join('\n')}\n\n` +
-      `\`-hit start\` · \`-hit stop\` · \`-hit add <type> email:pass\` · \`-hit add <type> email:pass:Name\``,
+      `\`-hit start\` · \`-hit stop\` · \`-hit stock\`\n` +
+      `➕ Add combos on the **website** (mixed / banned / unbanned / xbox / codes)`,
     brand.gold
   );
-}
-
-function setCapture(uid, type) {
-  pendingCapture.set(String(uid), { type, expires: Date.now() + 300000 });
-}
-function getCapture(uid) {
-  const p = pendingCapture.get(String(uid));
-  if (!p) return null;
-  if (Date.now() > p.expires) {
-    pendingCapture.delete(String(uid));
-    return null;
-  }
-  return p;
-}
-function clearCapture(uid) {
-  pendingCapture.delete(String(uid));
 }
 
 async function handleHitsMessage(message, client) {
   if (!message.guild || message.author.bot) return false;
   const content = (message.content || '').trim();
   const P = brand.PREFIX || '-';
-  const { isStaff } = require('../utils/staff');
+  if (!content.startsWith(P)) return false;
+  const args = content.slice(P.length).trim().split(/\s+/);
+  const cmd = (args.shift() || '').toLowerCase();
+  if (!['hit', 'hits'].includes(cmd)) return false;
 
-  const cap = getCapture(message.author.id);
-  if (cap && !content.startsWith(P)) {
-    if (!isStaff(message.member)) return false;
-    const accounts = extractAccounts(content + '\n' + (await fetchTxt(message)));
-    if (!accounts.length) {
-      await message.reply({ embeds: [E('🎯 Hits', '❌ No email:pass', brand.red)] });
-      clearCapture(message.author.id);
+  const { isStaff } = require('../utils/staff');
+  const staff = isStaff(message.member);
+  const g = message.guild;
+
+  if (cmd === 'hits' || !args[0] || ['stock', 'list', 'status'].includes(args[0].toLowerCase())) {
+    await message.reply({ embeds: [stockEmbed(g)] });
+    return true;
+  }
+
+  const sub = args[0].toLowerCase();
+
+  if (sub === 'start') {
+    if (!staff) {
+      await message.reply({ embeds: [E('Hits', 'Staff only.', brand.red)] });
       return true;
     }
-    const n = queueAdd(cap.type, accounts, { addedBy: message.author.id });
-    clearCapture(message.author.id);
+    startPoster(client || message.client);
+    await message.reply({
+      embeds: [E(`${ic(g, 'hit')} Hits`, `${ic(g, 'unbanned')} Started · **${POST_INTERVAL_MS / 1000}s**`, brand.green)]
+    });
+    return true;
+  }
+
+  if (sub === 'stop') {
+    if (!staff) {
+      await message.reply({ embeds: [E('Hits', 'Staff only.', brand.red)] });
+      return true;
+    }
+    stopPoster();
+    await message.reply({ embeds: [E(`${ic(g, 'hit')} Hits`, `${ic(g, 'banned')} Stopped`, brand.gold)] });
+    return true;
+  }
+
+  // add / cd blocked on Discord — website only
+  if (sub === 'add' || sub === 'cd') {
     await message.reply({
       embeds: [
-        E('🎯 Queued', `${HIT_TYPES[cap.type].emoji} **${n}** queued · total **${countAll()[cap.type]}**`, brand.green)
+        E(
+          `${ic(g, 'hit')} Hits`,
+          `Adding **mixed / banned / unbanned / xbox / codes** is only on the **website** panel.\n` +
+            `Discord: \`-hit start\` · \`-hit stop\` · \`-hit stock\``,
+          brand.gold
+        )
       ]
     });
     return true;
   }
 
-  if (!content.startsWith(P)) return false;
-  const args = content.slice(P.length).trim().split(/\s+/);
-  const cmd = (args.shift() || '').toLowerCase();
-  if (!['hit', 'hits', 'cd'].includes(cmd)) return false;
-  const staff = isStaff(message.member);
-
-  if (cmd === 'cd') {
-    if (!staff) return void message.reply({ embeds: [E('🎯', 'Staff only', brand.red)] });
-    const type = resolveType(args[0]);
-    if (!type) return void message.reply({ embeds: [E('🎯', '`-cd mixed|banned|unbanned|xbox|codes`', brand.gold)] });
-    setCapture(message.author.id, type);
-    await message.reply({ embeds: [E('🎯 Capture', `Next msg → **${HIT_TYPES[type].label}**`, brand.green)] });
-    return true;
-  }
-
-  if (cmd === 'hits' || (cmd === 'hit' && (!args[0] || ['stock', 'list', 'status'].includes(args[0].toLowerCase())))) {
-    await message.reply({ embeds: [stockEmbed()] });
-    return true;
-  }
-
-  if (cmd === 'hit' && args[0]?.toLowerCase() === 'start') {
-    if (!staff) return void message.reply({ embeds: [E('🎯', 'Staff only', brand.red)] });
-    startPoster(client || message.client);
-    await message.reply({ embeds: [E('🎯 Hits', `🟢 Started · **${POST_INTERVAL_MS / 1000}s**`, brand.green)] });
-    return true;
-  }
-
-  if (cmd === 'hit' && args[0]?.toLowerCase() === 'stop') {
-    if (!staff) return void message.reply({ embeds: [E('🎯', 'Staff only', brand.red)] });
-    stopPoster();
-    await message.reply({ embeds: [E('🎯 Hits', '🔴 Stopped', brand.gold)] });
-    return true;
-  }
-
-  if (cmd === 'hit' && args[0]?.toLowerCase() === 'add') {
-    if (!staff) return void message.reply({ embeds: [E('🎯', 'Staff only', brand.red)] });
-    args.shift();
-    let type = resolveType(args[0]);
-    let rest = args.slice(1);
-    if (!type) {
-      type = 'mixed';
-      rest = args;
-    }
-    const accounts = extractAccounts(rest.join(' ') + '\n' + (await fetchTxt(message)));
-    if (!accounts.length) {
-      await message.reply({ embeds: [E('🎯', '`-hit add mixed email:pass` or `email:pass:Name`', brand.red)] });
-      return true;
-    }
-    const n = queueAdd(type, accounts, { addedBy: message.author.id });
-    await message.reply({
-      embeds: [E('🎯 Queued', `${HIT_TYPES[type].emoji} **${n}** · queue **${countAll()[type]}**`, brand.green)]
-    });
-    return true;
-  }
-
-  if (cmd === 'hit') {
-    await message.reply({ embeds: [stockEmbed()] });
-    return true;
-  }
-  return false;
+  await message.reply({ embeds: [stockEmbed(g)] });
+  return true;
 }
 
 function resumeHitsPoster(client) {
@@ -416,7 +372,9 @@ module.exports = {
   stopPoster,
   resumeHitsPoster,
   queueAdd,
+  addFromWebsite,
   countAll,
   stockEmbed,
-  ensure
+  ensure,
+  resolveType
 };
