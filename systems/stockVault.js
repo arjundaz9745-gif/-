@@ -202,12 +202,22 @@ const NO = /^(no|nope|nah|not|false)$/i;
 async function handleLegitReply(message) {
   if (message.author.bot) return false;
   const ref = message.reference?.messageId;
-  if (!ref) return false;
-  const pend = pendingLegit.get(ref);
+  let pend = ref ? pendingLegit.get(ref) : null;
+  let pendKey = ref;
+  if (!pend) {
+    // fallback: latest pending in this channel
+    for (const [id, p] of pendingLegit) {
+      if (p.channelId === message.channel.id && Date.now() <= p.expires) {
+        pend = p;
+        pendKey = id;
+      }
+    }
+  }
   if (!pend || Date.now() > pend.expires) return false;
+  if (!YES.test(message.content.trim()) && !NO.test(message.content.trim())) return false;
   const t = message.content.trim();
   if (YES.test(t)) {
-    pendingLegit.delete(ref);
+    pendingLegit.delete(pendKey);
     const who = pend.customerId ? `<@${pend.customerId}>` : 'customer';
     await message.channel.send(`-# PLEASE VOUCH ${who}`).catch(() => {});
     message.client._pendingVouch = message.client._pendingVouch || new Map();
@@ -220,7 +230,7 @@ async function handleLegitReply(message) {
     return true;
   }
   if (NO.test(t)) {
-    pendingLegit.delete(ref);
+    pendingLegit.delete(pendKey);
     await message.channel.send(
       `<@${pend.staffId}>, Please Handle it...\n` +
         (pend.customerId ? `<@${pend.customerId}>` : '@customer') +
@@ -252,7 +262,15 @@ async function handleVouchMessage(message) {
   return true;
 }
 
+function registerLegitPending(messageId, data) {
+  pendingLegit.set(String(messageId), {
+    ...data,
+    expires: Date.now() + 15 * 60 * 1000
+  });
+}
+
 module.exports = {
+  registerLegitPending,
   handleStockCommands,
   handleLegitReply,
   handleVouchMessage,

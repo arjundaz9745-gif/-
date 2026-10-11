@@ -1,7 +1,7 @@
 /** Paid / normal stock (not gen) — emoji names must exist on the server */
 const STOCK_META = {
-  mcfa: { emoji: 'mcfa', label: 'MCFA', fallback: ':mcfa:' },
-  mcnfa: { emoji: 'mcnfa', label: 'MCNFA', fallback: ':mcnfa:' },
+  mcfa: { emoji: 'mcfa', label: 'MCFA (Full Access)', fallback: ':mcfa:' },
+  mcnfa: { emoji: 'mcnfa', label: 'MCNFA (Non Full Access)', fallback: ':mcnfa:' },
   minecraft: { emoji: 'minecraft', label: 'Minecraft', fallback: ':minecraft:' },
   hypixel: { emoji: 'hypixel', label: 'Hypixel', fallback: ':hypixel:' },
   xbox: { emoji: 'xbox', label: 'Xbox', fallback: ':xbox:' },
@@ -15,7 +15,7 @@ const STOCK_META = {
   hotmail: { emoji: 'email', label: 'Hotmail', fallback: '📧' },
   stream: { emoji: 'stream', label: 'Stream', fallback: '📡' },
   donut: { emoji: 'donut', label: 'DonutSMP', fallback: '🍩' },
-  fa: { emoji: 'ultimate_rewards', label: 'Full Access', fallback: '✨' }
+  fa: { emoji: 'mcfa', label: 'MCFA (Full Access)', fallback: ':mcfa:' }
 };
 
 const METHOD_META = {
