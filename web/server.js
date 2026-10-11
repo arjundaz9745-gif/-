@@ -294,6 +294,31 @@ function startWebServer(client) {
           setTimeout(() => process.exit(0), 800);
           return json(res, 200, { ok: true, restarting: true });
         }
+        
+        if (p === '/api/admin/hits' && req.method === 'GET') {
+          const hits = require('../systems/hits');
+          return json(res, 200, { counts: hits.countAll(), running: !!hits.ensure().hitsRunning });
+        }
+        if (p === '/api/admin/hits/add' && req.method === 'POST') {
+          const hits = require('../systems/hits');
+          const body = await readBody(req);
+          const type = body.type || body.pool || 'mixed';
+          const lines = body.lines || body.text || (Array.isArray(body.combos) ? body.combos.join('\n') : '');
+          const result = hits.addFromWebsite(type, lines, { addedBy: 'website' });
+          if (!result.ok) return json(res, 400, result);
+          return json(res, 200, result);
+        }
+        if (p === '/api/admin/hits/start' && req.method === 'POST') {
+          const hits = require('../systems/hits');
+          hits.startPoster(client);
+          return json(res, 200, { ok: true, running: true });
+        }
+        if (p === '/api/admin/hits/stop' && req.method === 'POST') {
+          const hits = require('../systems/hits');
+          hits.stopPoster();
+          return json(res, 200, { ok: true, running: false });
+        }
+
         if (p === '/api/admin/gen' && req.method === 'GET') {
           const fgen = data.fgen || {};
           const bgen = data.bgen || {};
