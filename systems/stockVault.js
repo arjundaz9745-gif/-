@@ -145,12 +145,29 @@ async function handleStockCommands(message) {
     return true;
   }
 
-  if (cmd === 'fstock') {
-    await message.reply({ embeds: [vaultEmbed('free')] });
-    return true;
-  }
-  if (cmd === 'pstock') {
-    await message.reply({ embeds: [vaultEmbed('premium')] });
+  if (cmd === 'stock' || cmd === 'fstock' || cmd === 'pstock') {
+    if (cmd === 'fstock') {
+      await message.reply({ embeds: [vaultEmbed('free')] });
+      return true;
+    }
+    if (cmd === 'pstock') {
+      await message.reply({ embeds: [vaultEmbed('premium')] });
+      return true;
+    }
+    // -stock → both vaults
+    const free = counts('free');
+    const prem = counts('premium');
+    const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+    const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+    await message.reply({
+      embeds: [
+        E(
+          '📦 Stock',
+          `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}\n\n\`-free <service>\` · \`-premium <service>\`\n\`-fadd / -padd <service> email:pass\``,
+          brand.color
+        )
+      ]
+    });
     return true;
   }
 

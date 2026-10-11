@@ -119,7 +119,7 @@ async function handleGenMessage(message, client) {
   }
 
   // Unified stock
-  if (cmd === 'stock' || cmd === 'fstock' || cmd === 'pstock' || cmd === 'bstock') {
+  if (cmd === 'genstock' || cmd === 'gstock') {
     await message.reply({ embeds: [stockEmbed(message.guild)] });
     return true;
   }
