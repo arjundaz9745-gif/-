@@ -865,7 +865,15 @@ async function handleCommand(message, client) {
   }
 
   if (cmd === 'stock') {
-    await message.reply({ embeds: [E('Ultimate Rewards · Stock', formatStockList(data, message.guild))] });
+    // vault handled in stockVault first; fallback paid list
+    const stockVault = require('../systems/stockVault');
+    const free = stockVault.counts('free');
+    const prem = stockVault.counts('premium');
+    const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+    const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+    await message.reply({
+      embeds: [E('📦 Stock', `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}`, brand.color)]
+    });
     return true;
   }
   if (cmd === 'stockadd') {
