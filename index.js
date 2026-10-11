@@ -28,6 +28,10 @@ const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
 const runtimeLog = require('./systems/runtimeLog');
 const { handleCommand } = require('./commands/router');
+const { handleHitsMessage, resumeHitsPoster } = require('./systems/hits');
+const levels = require('./systems/levels');
+const eventsSys = require('./systems/events');
+const stockVault = require('./systems/stockVault');
 const { startWebServer } = require('./web/server');
 const { registerAntiNuke } = require('./systems/antinuke');
 const { registerReactionRoles } = require('./systems/reactionRoles');
@@ -59,6 +63,8 @@ client.once('clientReady', onReady);
 async function onReady() {
   try { runtimeLog.markStart(); runtimeLog.info('Bot ready as ' + (client.user && client.user.tag)); } catch (_) {}
   console.log(`${brand.BOT_NAME} online as ${client.user.tag}`);
+  try { resumeHitsPoster(client); } catch (_) {}
+  setInterval(() => { try { eventsSys.tickEvents(client); } catch (_) {} }, 30000);
   try {
     const cmds = [
       new SlashCommandBuilder().setName('help').setDescription('Show bot commands'),
@@ -275,11 +281,7 @@ client.on('messageCreate', async (message) => {
   const data = dataStore.get();
   addMessageCount(message.guild.id, message.author.id);
 
-  // XP / levels
-  if (!data.levels) data.levels = {};
-  if (!data.levels[message.guild.id]) data.levels[message.guild.id] = {};
-  data.levels[message.guild.id][message.author.id] =
-    (data.levels[message.guild.id][message.author.id] || 0) + 1 + Math.floor(Math.random() * 3);
+  // levels handled later via systems/levels
 
   if (data.afk?.[message.author.id]) {
     delete data.afk[message.author.id];
@@ -358,6 +360,50 @@ client.on('messageCreate', async (message) => {
       return;
     }
   }
+
+  // levels
+  try {
+    if (message.guild && !message.author.bot) {
+      const prev = (dataStore.get().levels?.[message.guild.id]?.[message.author.id]) || 0;
+      const xp = levels.addMessageXp(message.guild.id, message.author.id);
+      levels.handleLevelUp(message, prev, xp);
+    }
+  } catch (_) {}
+
+  // event create follow-up
+  try {
+    const pendEv = eventsSys.getPending(message.author.id);
+    if (pendEv && !message.content.startsWith(brand.PREFIX)) {
+      const ev = eventsSys.createEvent({
+        guildId: message.guild.id,
+        channelId: message.channel.id,
+        name: pendEv.name,
+        body: message.content,
+        endsAt: pendEv.endsAt,
+        createdBy: message.author.id
+      });
+      eventsSys.clearPending(message.author.id);
+      await message.reply({
+        embeds: [E('Event', `**${ev.name}** live` + (ev.endsAt ? ` · ends <t:${Math.floor(ev.endsAt/1000)}:R>` : ' · ♾️'), brand.green)]
+      });
+      await message.channel.send({
+        embeds: [E(ev.name, ev.body, brand.gold)]
+      });
+      return;
+    }
+  } catch (e) { console.error('event', e.message); }
+
+  try {
+    if (await stockVault.handleLegitReply(message)) return;
+    if (await stockVault.handleVouchMessage(message)) return;
+    if (await stockVault.handleStockCommands(message)) return;
+  } catch (e) { console.error('stock', e.message); }
+
+  const hitHandled = await handleHitsMessage(message, client).catch((e) => {
+    console.error('hits', e.message);
+    return false;
+  });
+  if (hitHandled) return;
 
   await handleCommand(message, client);
 });
