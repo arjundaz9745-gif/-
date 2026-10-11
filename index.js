@@ -20,8 +20,6 @@ const { handleMentions } = require('./systems/pingProtect');
 const { askAI } = require('./systems/ai');
 const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
-const { handleExeMessage } = require('./systems/exeClean');
-const { handlePsdMessage } = require('./systems/psd');
 const { handleBackupMessage, handleBackupInteraction, applyPendingMemberRoles } = require('./systems/serverBackup');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
@@ -379,8 +377,6 @@ client.on('messageCreate', async (message) => {
   } catch (e) { console.error('stock', e.message); }
 
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
-  if (await handleExeMessage(message, client).catch((e) => { console.error('exe', e.message); return false; })) return;
-  if (await handlePsdMessage(message, client).catch((e) => { console.error('psd', e.message); return false; })) return;
   if (await handleBackupMessage(message, client).catch((e) => { console.error('backup', e.message); return false; })) return;
   if (await handleIAmHere(message).catch(() => false)) return;
 
