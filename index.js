@@ -123,7 +123,37 @@ async function onReady() {
         .setName('game')
         .setDescription('Play Tic Tac Toe')
         .addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true)),
-      new SlashCommandBuilder().setName('stock').setDescription('View gen stock'),
+      new SlashCommandBuilder().setName('stock').setDescription('View free + premium vault stock'),
+      new SlashCommandBuilder().setName('payouts').setDescription('Payout / legit stats'),
+      new SlashCommandBuilder()
+        .setName('event')
+        .setDescription('Create an event')
+        .addSubcommand((s) =>
+          s
+            .setName('add')
+            .setDescription('Add event — next message is the body')
+            .addStringOption((o) => o.setName('name').setDescription('Event name').setRequired(true))
+            .addStringOption((o) => o.setName('time').setDescription('e.g. 1h 30m (optional = forever)'))
+        )
+        .addSubcommand((s) => s.setName('list').setDescription('List active events')),
+      new SlashCommandBuilder()
+        .setName('level')
+        .setDescription('Show message level')
+        .addUserOption((o) => o.setName('user').setDescription('User')),
+      new SlashCommandBuilder()
+        .setName('free')
+        .setDescription('Take from free vault (staff)')
+        .addStringOption((o) => o.setName('service').setDescription('mcfa / mcnfa / donut / hypixel').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('premium')
+        .setDescription('Take from premium vault (staff)')
+        .addStringOption((o) => o.setName('service').setDescription('mcfa / mcnfa / donut / hypixel').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('hit')
+        .setDescription('Hits poster')
+        .addSubcommand((s) => s.setName('stock').setDescription('Hit queue counts'))
+        .addSubcommand((s) => s.setName('start').setDescription('Start posting'))
+        .addSubcommand((s) => s.setName('stop').setDescription('Stop posting')),
       new SlashCommandBuilder().setName('access').setDescription('Gen access guide'),
       new SlashCommandBuilder()
         .setName('backup')
@@ -277,6 +307,22 @@ client.on('messageDelete', async (message) => {
 });
 
 client.on('messageCreate', async (message) => {
+  // Anti-commands channel: members cannot use bot-style commands
+  try {
+    const antiCh = process.env.ANTI_CMD_CHANNEL_ID || '1557389786652741672';
+    if (message.channel.id === antiCh && message.guild && !message.author.bot) {
+      const { isStaff } = require('./utils/staff');
+      const txt = (message.content || '').trim();
+      const looksCmd = /^[\/!$%.&?\-]/.test(txt) || /^(ban|kick|mute|warn|purge|clear|help|stock|invites)\b/i.test(txt);
+      if (looksCmd && !isStaff(message.member)) {
+        await message.delete().catch(() => {});
+        const w = await message.channel.send({ content: `<@${message.author.id}> Commands are disabled here.` }).catch(() => null);
+        if (w) setTimeout(() => w.delete().catch(() => {}), 4000);
+        return;
+      }
+    }
+  } catch (_) {}
+
   if (!message.guild || message.author.bot) return;
   const data = dataStore.get();
   addMessageCount(message.guild.id, message.author.id);
@@ -326,6 +372,12 @@ client.on('messageCreate', async (message) => {
     // bot stopped from panel — ignore non-admin
     return;
   }
+  try {
+    if (await stockVault.handleLegitReply(message)) return;
+    if (await stockVault.handleVouchMessage(message)) return;
+    if (await stockVault.handleStockCommands(message)) return;
+  } catch (e) { console.error('stock', e.message); }
+
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
   if (await handleExeMessage(message, client).catch((e) => { console.error('exe', e.message); return false; })) return;
   if (await handlePsdMessage(message, client).catch((e) => { console.error('psd', e.message); return false; })) return;
@@ -393,12 +445,6 @@ client.on('messageCreate', async (message) => {
     }
   } catch (e) { console.error('event', e.message); }
 
-  try {
-    if (await stockVault.handleLegitReply(message)) return;
-    if (await stockVault.handleVouchMessage(message)) return;
-    if (await stockVault.handleStockCommands(message)) return;
-  } catch (e) { console.error('stock', e.message); }
-
   const hitHandled = await handleHitsMessage(message, client).catch((e) => {
     console.error('hits', e.message);
     return false;
@@ -441,6 +487,74 @@ client.on('interactionCreate', async (interaction) => {
     const name = interaction.commandName;
     const reply = (x) => interaction.reply(typeof x === 'string' ? { content: x, ephemeral: true } : x);
     const data = dataStore.get();
+
+    
+    if (name === 'payouts') {
+      const list = Object.values(eventsSys.ensure());
+      let total = 0;
+      const staffs = new Set();
+      for (const e of list) {
+        for (const [sid, n] of Object.entries(e.payoutStaff || {})) {
+          total += n;
+          staffs.add(sid);
+        }
+      }
+      return reply({ embeds: [E('Payouts', `Recorded **${total}** legits by **${staffs.size}** staff.`, brand.color)] });
+    }
+    if (name === 'level') {
+      const u = interaction.options.getUser('user') || interaction.user;
+      const member = await interaction.guild.members.fetch(u.id).catch(() => null) || interaction.member;
+      const xp = (data.levels?.[interaction.guildId]?.[u.id]) || 0;
+      await interaction.deferReply({ ephemeral: true });
+      await levels.sendLevelCard(interaction.channel, member, xp);
+      return interaction.editReply({ content: 'Level card sent.' }).catch(() => {});
+    }
+    if (name === 'stock') {
+      const free = stockVault.counts('free');
+      const prem = stockVault.counts('premium');
+      const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+      const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+      return reply({ embeds: [E('📦 Stock', `**FREE**\n${fl}\n\n**PREMIUM**\n${pl}`, brand.color)] });
+    }
+    if (name === 'event') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'list') {
+        const list = eventsSys.listActive(interaction.guildId);
+        return reply({ embeds: [E('Events', list.length ? list.map((e) => `• **${e.name}**`).join('\n') : 'None', brand.color)] });
+      }
+      if (sub === 'add') {
+        const { isStaff } = require('./utils/staff');
+        if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+        const ename = interaction.options.getString('name', true);
+        const timeRaw = interaction.options.getString('time');
+        let endsAt = null;
+        if (timeRaw) {
+          const ms = parseDuration(timeRaw);
+          if (ms) endsAt = Date.now() + ms;
+        }
+        eventsSys.setPending(interaction.user.id, { name: ename, endsAt });
+        return reply({ content: 'Send the **event body** as your next message (e.g. `2 invites = mcfa`).', ephemeral: true });
+      }
+    }
+    if (name === 'hit') {
+      const { isStaff } = require('./utils/staff');
+      const sub = interaction.options.getSubcommand();
+      const { stockEmbed, startPoster, stopPoster } = require('./systems/hits');
+      if (sub === 'stock') return reply({ embeds: [stockEmbed()] });
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.' });
+      if (sub === 'start') {
+        startPoster(client);
+        return reply({ content: 'Hits poster started.' });
+      }
+      if (sub === 'stop') {
+        stopPoster();
+        return reply({ content: 'Hits poster stopped.' });
+      }
+    }
+    if (name === 'free' || name === 'premium') {
+      // staff only deliver via telling them to use prefix for now
+      return reply({ content: `Use \`-${name} ${interaction.options.getString('service')}\` in the ticket (staff).`, ephemeral: true });
+    }
 
     if (name === 'help') return reply({ embeds: [E(brand.BOT_NAME, `Prefix \`${brand.PREFIX}\` · \`${brand.PREFIX}help\``)], ephemeral: true });
     if (name === 'invites') {
