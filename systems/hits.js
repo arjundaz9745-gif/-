@@ -10,6 +10,17 @@ const { E } = require('../utils/embeds');
 const { em } = require('./stocks');
 
 const DEFAULT_IGN = 'DashWho';
+
+function randomSkinId() {
+  // random UUID → whatever skin that account has (or default Steve/Alex)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+
 const POST_INTERVAL_MS = parseInt(process.env.HIT_POST_INTERVAL_MS || '5000', 10);
 
 const CHANNELS = {
@@ -123,11 +134,14 @@ function randomMoney() {
 function makeRecord(acc, type, meta = {}) {
   const hasName = !!(acc.username && String(acc.username).trim());
   const st = luckStatus(type);
+  const displayName = hasName ? String(acc.username).trim() : DEFAULT_IGN;
+  const skinId = hasName ? displayName : randomSkinId();
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     email: acc.email,
     password: acc.password,
-    name: hasName ? String(acc.username).trim() : DEFAULT_IGN,
+    name: displayName,
+    skinId,
     type,
     hypixel: st.hypixel,
     donut: st.donut,
@@ -171,11 +185,25 @@ function countAll() {
   return o;
 }
 
-function skinUrl(name) {
-  return 'https://mc-heads.net/body/' + encodeURIComponent(name || DEFAULT_IGN) + '/180';
+function skinUrl(idOrName) {
+  const id = String(idOrName || DEFAULT_IGN);
+  // UUID → crafatar body; name → mc-heads
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) || /^[0-9a-f]{32}$/i.test(id)) {
+    const bare = id.replace(/-/g, '');
+    return 'https://crafatar.com/renders/body/' + bare + '?overlay=true&scale=10';
+  }
+  return 'https://mc-heads.net/body/' + encodeURIComponent(id) + '/180';
 }
-function avatarUrl(name) {
-  return 'https://mc-heads.net/avatar/' + encodeURIComponent(name || DEFAULT_IGN) + '/128';
+function avatarUrl(idOrName) {
+  const id = String(idOrName || DEFAULT_IGN);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) || /^[0-9a-f]{32}$/i.test(id)) {
+    const bare = id.replace(/-/g, '');
+    return 'https://crafatar.com/avatars/' + bare + '?overlay=true&size=128';
+  }
+  return 'https://mc-heads.net/avatar/' + encodeURIComponent(id) + '/128';
+}
+function skinForHit(hit) {
+  return hit.skinId || hit.name || randomSkinId();
 }
 
 function banLine(guild, status) {
@@ -217,8 +245,8 @@ function buildHitEmbed(hit, guild) {
     )
     .setTitle(ic(guild, t.emojiName) + ' ' + t.label)
     .setDescription(desc)
-    .setThumbnail(avatarUrl(ign))
-    .setImage(skinUrl(ign))
+    .setThumbnail(avatarUrl(skinForHit(hit)))
+    .setImage(skinUrl(skinForHit(hit)))
     .setFooter({ text: 'Ultimate Rewards · DashMod' })
     .setTimestamp();
 }
