@@ -70,12 +70,34 @@ async function handleCommand(message, client) {
         return true;
       }
       const left = (data.stocks[key] || []).length;
+      const accessLine =
+        key === 'mcnfa' || (meta.label || '').toLowerCase().includes('non')
+          ? '**Non Full Access (NFA)**'
+          : key === 'mcfa' || key === 'fa'
+            ? '**Full Access (FA)**'
+            : `**${meta.label}**`;
       const body =
         `${b.ur} **Ultimate Rewards** ${b.dm}\n` +
-        `${icon} **Here is the FA** · **${meta.label}**\n\n` +
+        `${icon} Here is your account · ${accessLine}\n\n` +
         `||${item}||\n\n` +
         `${em(message.guild, 'verified', '✅')} Delivered · left **${left}**`;
       await message.reply({ embeds: [E(`${icon} ${meta.label}`, body, brand.green)] });
+      const legitMsg = await message.channel.send({
+        content:
+          `# ARE WE LEGIT?\n` +
+          `Reply **yes** / **yeah** / **yep** or **no** / **nope** (reply to this message)`
+      });
+      try {
+        const stockVault = require('../systems/stockVault');
+        if (stockVault.registerLegitPending) {
+          stockVault.registerLegitPending(legitMsg.id, {
+            staffId: message.author.id,
+            customerId: message.mentions.users.first()?.id || (message.channel.topic || '').match(/\d{17,20}/)?.[0] || null,
+            item: meta.label || key,
+            channelId: message.channel.id
+          });
+        }
+      } catch (_) {}
       return true;
     }
   }
@@ -912,7 +934,7 @@ async function handleCommand(message, client) {
       embeds: [
         E(
           icon + ' ' + (meta.label || name),
-          `${b.ur} **Ultimate Rewards** ${b.dm}\n${icon} **Here is the FA**\n\n||${item}||\n\nLeft: **${data.stocks[name].length}**`,
+          `${b.ur} **Ultimate Rewards** ${b.dm}\n${icon} **Here is your account**\n\n||${item}||\n\nLeft: **${data.stocks[name].length}**`,
           brand.green
         )
       ]
