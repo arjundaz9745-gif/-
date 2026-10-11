@@ -295,6 +295,26 @@ function startWebServer(client) {
           return json(res, 200, { ok: true, restarting: true });
         }
         
+        
+        if (p === '/api/admin/vault' && req.method === 'GET') {
+          const stockVault = require('../systems/stockVault');
+          return json(res, 200, {
+            free: stockVault.counts('free'),
+            premium: stockVault.counts('premium'),
+            services: { free: stockVault.FREE_SERVICES, premium: stockVault.PREMIUM_SERVICES }
+          });
+        }
+        if (p === '/api/admin/vault/add' && req.method === 'POST') {
+          const stockVault = require('../systems/stockVault');
+          const body = await readBody(req);
+          const tier = (body.tier || 'free').toLowerCase() === 'premium' ? 'premium' : 'free';
+          const service = String(body.service || '').toLowerCase();
+          const lines = String(body.lines || body.text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l.includes(':'));
+          if (!service || !lines.length) return json(res, 400, { error: 'service + lines required' });
+          const n = stockVault.addStock(tier, service, lines);
+          return json(res, 200, { ok: true, added: n, counts: stockVault.counts(tier) });
+        }
+
         if (p === '/api/admin/hits' && req.method === 'GET') {
           const hits = require('../systems/hits');
           return json(res, 200, { counts: hits.countAll(), running: !!hits.ensure().hitsRunning });
