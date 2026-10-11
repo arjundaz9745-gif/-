@@ -301,7 +301,11 @@ function startWebServer(client) {
           return json(res, 200, {
             free: stockVault.counts('free'),
             premium: stockVault.counts('premium'),
-            services: { free: stockVault.FREE_SERVICES, premium: stockVault.PREMIUM_SERVICES }
+            services: {
+              free: stockVault.getServices('free'),
+              premium: stockVault.getServices('premium')
+            },
+            emojis: stockVault.listServiceEmojis()
           });
         }
         if (p === '/api/admin/vault/add' && req.method === 'POST') {
@@ -337,6 +341,53 @@ function startWebServer(client) {
           const hits = require('../systems/hits');
           hits.stopPoster();
           return json(res, 200, { ok: true, running: false });
+        }
+
+        
+        if (p === '/api/admin/vault/service' && req.method === 'POST') {
+          const stockVault = require('../systems/stockVault');
+          const body = await readBody(req);
+          const tier = (body.tier || 'free').toLowerCase() === 'premium' ? 'premium' : 'free';
+          const result = stockVault.addService(tier, body.name || body.service, body.emoji || body.emojiName);
+          if (!result.ok) return json(res, 400, result);
+          return json(res, 200, result);
+        }
+        if (p === '/api/admin/gen/add' && req.method === 'POST') {
+          const body = await readBody(req);
+          const tier = String(body.tier || body.pool || 'fgen').toLowerCase(); // fgen | bgen | pgen
+          const service = String(body.service || body.key || 'default').toLowerCase();
+          const lines = String(body.lines || body.text || '')
+            .split(/\r?\n/)
+            .map((l) => l.trim())
+            .filter((l) => l.includes(':'));
+          if (!lines.length) return json(res, 400, { error: 'no combos' });
+          if (!data.fgen) data.fgen = {};
+          if (!data.bgen) data.bgen = {};
+          if (!data.pgen) data.pgen = {};
+          const pool = tier === 'pgen' || tier === 'premium' ? data.pgen : tier === 'bgen' || tier === 'booster' ? data.bgen : data.fgen;
+          if (!pool[service]) pool[service] = [];
+          pool[service].push(...lines);
+          dataStore.save();
+          try { require('../systems/sync').scheduleExport(client, 'gen'); } catch (_) {}
+          return json(res, 200, { ok: true, added: lines.length, service, tier, total: pool[service].length });
+        }
+        if (p === '/api/admin/commands' && req.method === 'GET') {
+          return json(res, 200, {
+            prefix: process.env.PREFIX || '-',
+            slash: [
+              'help', 'invites', 'messages', 'giveaway', 'export', 'protection', 'serverinfo', 'userinfo',
+              'purge', 'ban', 'kick', 'timeout', 'ping', 'avatar', 'game', 'stock', 'payouts', 'event',
+              'level', 'free', 'premium', 'hit', 'access', 'backup'
+            ],
+            prefixGroups: {
+              hits: ['-hit start', '-hit stop', '-hit stock'],
+              vault: ['-stock', '-fstock', '-pstock', '-fadd', '-padd', '-free', '-premium'],
+              paid: ['-mcfa', '-mcnfa', '-donut', '-hypixel', '-netflix', '-stockadd'],
+              levels: ['-lvl', '-level', '-payouts'],
+              events: ['-event add Name [1h]'],
+              mod: ['-ban', '-kick', '-timeout', '-purge', '-lock', '-unlock']
+            }
+          });
         }
 
         if (p === '/api/admin/gen' && req.method === 'GET') {
