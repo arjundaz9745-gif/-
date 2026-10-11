@@ -182,9 +182,10 @@ textarea{min-height:90px;resize:vertical}
     <nav class="nav">
       <button class="active" data-tab="overview">Overview</button>
       <button data-tab="botctl">Bot control</button>
+      <button data-tab="hits">Hits</button>
+      <button data-tab="vault">Vault stock</button>
       <button data-tab="gen">Gen stock</button>
-      <button data-tab="pass">Pass changer</button>
-      <button data-tab="protection">Protection</button>
+            <button data-tab="protection">Protection</button>
       <button data-tab="giveaways">Giveaways</button>
       <button data-tab="invites">Invites & Messages</button>
       <button data-tab="sync">Sync / Export</button>
@@ -252,19 +253,66 @@ textarea{min-height:90px;resize:vertical}
         </div>
       </section>
 
-      <section id="tab-gen" class="hidden">
+      
+      <section id="tab-hits" class="hidden">
+        <div class="card glass" style="margin-bottom:14px">
+          <h4 style="margin:0 0 10px">🎯 Hits poster</h4>
+          <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Add mixed / banned / unbanned / xbox / codes here only. Discord: <code>-hit start|stop|stock</code></p>
+          <div id="hits-counts" style="font-family:ui-monospace,monospace;font-size:.85rem;margin-bottom:12px">Loading…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn" id="hits-start">Start poster</button>
+            <button class="btn btn-ghost" id="hits-stop">Stop</button>
+            <button class="btn btn-ghost" id="hits-refresh">Refresh</button>
+          </div>
+          <label style="font-size:.8rem;color:var(--muted)">Pool</label>
+          <select id="hits-type" style="width:100%;margin:6px 0 10px;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff">
+            <option value="mixed">mixed</option>
+            <option value="hypixel_banned">banned</option>
+            <option value="hypixel_unbanned">unbanned</option>
+            <option value="xbox">xbox</option>
+            <option value="xbox_codes">codes</option>
+          </select>
+          <label style="font-size:.8rem;color:var(--muted)">Combos (email:pass or email:pass:Name · one per line)</label>
+          <textarea id="hits-lines" rows="8" placeholder="mail@x.com:pass&#10;mail2@x.com:pass:Steve" style="width:100%;margin:6px 0 10px;padding:12px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff;font-family:ui-monospace,monospace"></textarea>
+          <button class="btn" id="hits-add">Add to queue</button>
+        </div>
+      </section>
+
+      <section id="tab-vault" class="hidden">
+        <div class="card glass" style="margin-bottom:14px">
+          <h4 style="margin:0 0 10px">📦 Free + Premium vault</h4>
+          <div id="vault-counts" style="font-family:ui-monospace,monospace;font-size:.85rem;margin-bottom:12px">Loading…</div>
+          <button class="btn btn-ghost" id="vault-refresh" style="margin-bottom:12px">Refresh</button>
+          <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Tier</label>
+              <select id="vault-tier" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff">
+                <option value="free">free</option>
+                <option value="premium">premium</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Service</label>
+              <select id="vault-service" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff">
+                <option value="mcfa">mcfa</option>
+                <option value="mcnfa">mcnfa</option>
+                <option value="donut">donut</option>
+                <option value="hypixel">hypixel</option>
+              </select>
+            </div>
+          </div>
+          <label style="font-size:.8rem;color:var(--muted);display:block;margin-top:10px">Combos</label>
+          <textarea id="vault-lines" rows="6" placeholder="email:pass" style="width:100%;margin:6px 0 10px;padding:12px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff;font-family:ui-monospace,monospace"></textarea>
+          <button class="btn" id="vault-add">Add stock</button>
+        </div>
+      </section>
+
+<section id="tab-gen" class="hidden">
         <div class="card glass">
           <h2>Gen stock</h2>
           <pre id="gen-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem;white-space:pre-wrap">—</pre>
         </div>
       </section>
-      <section id="tab-pass" class="hidden">
-        <div class="card glass">
-          <h2>Pass changer</h2>
-          <pre id="pass-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem;white-space:pre-wrap">—</pre>
-        </div>
-      </section>
-
       <section id="tab-overview">
         <div class="grid">
           <div class="card glass"><div class="label">Bot</div><div class="value" id="st-tag">—</div><div class="hint" id="st-online">status</div></div>
@@ -511,7 +559,8 @@ document.querySelectorAll('.nav button').forEach((btn) => {
     if (tab === 'botctl') { if (!ensureBotPanelAuth()) return; startBotPolling(); }
     else stopBotPolling();
     if (tab === 'gen') refreshGen();
-    if (tab === 'pass') refreshPass();
+    if (tab === 'hits') refreshHits();
+    if (tab === 'vault') refreshVault();
   };
 });
 
@@ -536,6 +585,7 @@ document.querySelectorAll('.switch').forEach((el) => {
 });
 
 async function refreshAll() {
+  try { refreshHits(); refreshVault(); } catch (_) {}
   try {
     const st = await api('/api/admin/status');
     const tag = $('#st-tag'); if (tag) tag.textContent = st.tag || st.name || '—';
@@ -715,14 +765,7 @@ async function refreshGen() {
   }
 }
 
-async function refreshPass() {
-  try {
-    const d = await api('/api/admin/pass');
-    const el = $('#pass-status'); if (el) el.textContent = JSON.stringify(d, null, 2);
-  } catch (e) {
-    const el = $('#pass-status'); if (el) el.textContent = e.message;
-  }
-}
+
 
 function startBotPolling() {
   refreshBot();
@@ -781,6 +824,50 @@ if (_saveP) _saveP.onclick = async () => {
 };
 
 if (localStorage.getItem(tokenKey)) showApp();
+
+async function refreshHits() {
+  try {
+    const d = await api('/api/admin/hits');
+    const c = d.counts || {};
+    const lines = Object.keys(c).map(k => k + ': ' + c[k]).join(' · ');
+    const el = document.getElementById('hits-counts');
+    if (el) el.textContent = (d.running ? 'RUNNING' : 'STOPPED') + ' · ' + lines;
+  } catch (e) { toast('Hits load failed'); }
+}
+async function refreshVault() {
+  try {
+    const d = await api('/api/admin/vault');
+    const fmt = (o) => Object.entries(o || {}).map(([k,v]) => k + ':' + v).join(' · ');
+    const el = document.getElementById('vault-counts');
+    if (el) el.innerHTML = '<b>FREE</b> ' + fmt(d.free) + '<br/><b>PREMIUM</b> ' + fmt(d.premium);
+  } catch (e) { toast('Vault load failed'); }
+}
+document.getElementById('hits-refresh')?.addEventListener('click', refreshHits);
+document.getElementById('hits-start')?.addEventListener('click', async () => {
+  await api('/api/admin/hits/start', { method: 'POST', body: '{}' });
+  toast('Hits started'); refreshHits();
+});
+document.getElementById('hits-stop')?.addEventListener('click', async () => {
+  await api('/api/admin/hits/stop', { method: 'POST', body: '{}' });
+  toast('Hits stopped'); refreshHits();
+});
+document.getElementById('hits-add')?.addEventListener('click', async () => {
+  const type = document.getElementById('hits-type').value;
+  const lines = document.getElementById('hits-lines').value;
+  const r = await api('/api/admin/hits/add', { method: 'POST', body: JSON.stringify({ type, lines }) });
+  if (r.error || r.ok === false) toast(r.error || 'Failed');
+  else { toast('Added ' + r.added); document.getElementById('hits-lines').value=''; refreshHits(); }
+});
+document.getElementById('vault-refresh')?.addEventListener('click', refreshVault);
+document.getElementById('vault-add')?.addEventListener('click', async () => {
+  const tier = document.getElementById('vault-tier').value;
+  const service = document.getElementById('vault-service').value;
+  const lines = document.getElementById('vault-lines').value;
+  const r = await api('/api/admin/vault/add', { method: 'POST', body: JSON.stringify({ tier, service, lines }) });
+  if (r.error) toast(r.error);
+  else { toast('Added ' + r.added); document.getElementById('vault-lines').value=''; refreshVault(); }
+});
+
 </script>
 </body>
 </html>
