@@ -869,10 +869,11 @@ async function handleCommand(message, client) {
     const stockVault = require('../systems/stockVault');
     const free = stockVault.counts('free');
     const prem = stockVault.counts('premium');
-    const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
-    const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
+    const { em: emIcon } = require('../systems/stocks');
+    const fl = Object.entries(free).map(([s, n]) => `${emIcon(message.guild, s, ':' + s + ':')} **${s}** → \`${n}\``).join('\n') || '_empty_';
+    const pl = Object.entries(prem).map(([s, n]) => `${emIcon(message.guild, s, ':' + s + ':')} **${s}** → \`${n}\``).join('\n') || '_empty_';
     await message.reply({
-      embeds: [E('📦 Stock', `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}`, brand.color)]
+      embeds: [E(`${emIcon(message.guild, 'stock', '📦')} Stock`, `**FREE VAULT**\n${fl}\n\n**PREMIUM VAULT**\n${pl}`, brand.color)]
     });
     return true;
   }
