@@ -337,7 +337,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
     await message.channel.sendTyping().catch(() => {});
-    const reply = await askAI(message.content, message.channel.id, message.author.id);
+    const reply = await askAI(message.content, message.channel.id, message.author.id, message.member?.displayName || message.author.username);
     if (reply && reply.text) {
       await message.reply({ content: reply.text, allowedMentions: { parse: [] } }).catch(() => {});
     } else {
