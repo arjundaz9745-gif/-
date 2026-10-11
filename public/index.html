@@ -215,6 +215,11 @@ textarea{min-height:90px;resize:vertical}
       
       <section id="tab-botctl" class="hidden">
         <div class="card glass" style="margin-bottom:14px">
+          <h4 style="margin:0 0 8px">Registered / commands</h4>
+          <pre id="bot-cmds" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.82rem;white-space:pre-wrap">—</pre>
+        </div>
+
+        <div class="card glass" style="margin-bottom:14px">
           <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between">
             <div>
               <div style="font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Name</div>
@@ -304,13 +309,56 @@ textarea{min-height:90px;resize:vertical}
           <label style="font-size:.8rem;color:var(--muted);display:block;margin-top:10px">Combos</label>
           <textarea id="vault-lines" rows="6" placeholder="email:pass" style="width:100%;margin:6px 0 10px;padding:12px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff;font-family:ui-monospace,monospace"></textarea>
           <button class="btn" id="vault-add">Add stock</button>
+
+          <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:16px 0"/>
+          <h4 style="margin:0 0 8px">Add new service</h4>
+          <p style="color:var(--muted);font-size:.8rem;margin:0 0 10px">Emoji name = Discord emoji name without colons (e.g. <code>mcfa</code> for <code>:mcfa:</code>). Animated works if the server emoji is animated.</p>
+          <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr 1fr">
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Tier</label>
+              <select id="svc-tier" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff">
+                <option value="free">free</option>
+                <option value="premium">premium</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Service name</label>
+              <input id="svc-name" placeholder="netflix" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff"/>
+            </div>
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Emoji name</label>
+              <input id="svc-emoji" placeholder="netflix" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff"/>
+            </div>
+          </div>
+          <button class="btn" id="svc-add" style="margin-top:10px">Add service</button>
+
         </div>
       </section>
 
 <section id="tab-gen" class="hidden">
-        <div class="card glass">
-          <h2>Gen stock</h2>
+        <div class="card glass" style="margin-bottom:14px">
+          <h4 style="margin:0 0 10px">Gen stock</h4>
           <pre id="gen-status" style="background:rgba(0,0,0,.35);padding:12px;border-radius:10px;font-size:.85rem;white-space:pre-wrap">—</pre>
+          <button class="btn btn-ghost" id="gen-refresh" style="margin:10px 0">Refresh</button>
+          <hr style="border:none;border-top:1px solid rgba(255,255,255,.1);margin:12px 0"/>
+          <h4 style="margin:0 0 8px">Restock gen</h4>
+          <div style="display:grid;gap:10px;grid-template-columns:1fr 1fr">
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Pool</label>
+              <select id="gen-tier" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff">
+                <option value="fgen">Free gen (fgen)</option>
+                <option value="bgen">Booster gen (bgen)</option>
+                <option value="pgen">Premium gen (pgen)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:.8rem;color:var(--muted)">Service key</label>
+              <input id="gen-service" placeholder="mcfa" style="width:100%;padding:10px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff"/>
+            </div>
+          </div>
+          <label style="font-size:.8rem;color:var(--muted);display:block;margin-top:10px">Combos (email:pass)</label>
+          <textarea id="gen-lines" rows="6" style="width:100%;margin:6px 0 10px;padding:12px;border-radius:10px;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.12);color:#fff;font-family:ui-monospace,monospace"></textarea>
+          <button class="btn" id="gen-add">Restock gen</button>
         </div>
       </section>
       <section id="tab-overview">
@@ -399,18 +447,10 @@ textarea{min-height:90px;resize:vertical}
       </section>
 
       <section id="tab-commands" class="hidden">
-        <div class="panel glass">
-          <h4>Prefix commands (<code>-</code>)</h4>
-          <div style="font-size:.85rem;line-height:1.65;color:var(--muted)">
-            <p><strong style="color:var(--text)">Invites</strong> — -i -invites -addinvite -rmi -lb i</p>
-            <p><strong style="color:var(--text)">Messages</strong> — -m -lb m -rank -level</p>
-            <p><strong style="color:var(--text)">Mod</strong> — -ban -kick -timeout -warn -purge -lock -unlock -slowmode -role -nick</p>
-            <p><strong style="color:var(--text)">Giveaway</strong> — -gstart 1h 1 Prize · -gend</p>
-            <p><strong style="color:var(--text)">Utility</strong> — -si -userinfo -avatar -ping -afk -snipe -say -poll -steal</p>
-            <p><strong style="color:var(--text)">Setup</strong> — -protection -setai -setsync -export -import -autorole -stock -staffroles</p>
-            <p><strong style="color:var(--text)">Owner</strong> — -dashboard [#ch|@user]</p>
-            <p style="margin-top:10px"><strong style="color:var(--text)">Slash</strong> — /help /invites /giveaway /purge /ban /kick /timeout /serverinfo /avatar /ping</p>
-          </div>
+        <div class="card glass">
+          <h4 style="margin:0 0 10px">/ Slash + prefix commands</h4>
+          <button class="btn btn-ghost" id="cmd-refresh" style="margin-bottom:10px">Refresh list</button>
+          <pre id="cmd-list" style="background:rgba(0,0,0,.35);padding:14px;border-radius:10px;font-size:.82rem;white-space:pre-wrap;line-height:1.5">Loading…</pre>
         </div>
       </section>
 
@@ -559,6 +599,8 @@ document.querySelectorAll('.nav button').forEach((btn) => {
     if (tab === 'botctl') { if (!ensureBotPanelAuth()) return; startBotPolling(); }
     else stopBotPolling();
     if (tab === 'gen') refreshGen();
+    if (tab === 'commands') refreshCommands();
+    if (tab === 'botctl') refreshCommands();
     if (tab === 'hits') refreshHits();
     if (tab === 'vault') refreshVault();
   };
@@ -867,6 +909,66 @@ document.getElementById('vault-add')?.addEventListener('click', async () => {
   if (r.error) toast(r.error);
   else { toast('Added ' + r.added); document.getElementById('vault-lines').value=''; refreshVault(); }
 });
+
+
+async function refreshVault() {
+  try {
+    const d = await api('/api/admin/vault');
+    const fmt = (o) => Object.entries(o || {}).map(([k,v]) => k + ':' + v).join(' · ') || 'empty';
+    const el = document.getElementById('vault-counts');
+    if (el) el.innerHTML = '<b>FREE</b> ' + fmt(d.free) + '<br/><b>PREMIUM</b> ' + fmt(d.premium) +
+      '<br/><span style="color:var(--muted);font-size:.75rem">Services free: ' + (d.services?.free||[]).join(', ') +
+      ' | premium: ' + (d.services?.premium||[]).join(', ') + '</span>';
+    const sel = document.getElementById('vault-service');
+    if (sel && d.services) {
+      const tier = document.getElementById('vault-tier')?.value || 'free';
+      const list = d.services[tier] || d.services.free || [];
+      sel.innerHTML = list.map(s => '<option value="'+s+'">'+s+'</option>').join('') || '<option value="mcfa">mcfa</option>';
+    }
+  } catch (e) { toast('Vault load failed'); }
+}
+document.getElementById('vault-tier')?.addEventListener('change', refreshVault);
+document.getElementById('svc-add')?.addEventListener('click', async () => {
+  const tier = document.getElementById('svc-tier').value;
+  const name = document.getElementById('svc-name').value.trim();
+  const emoji = document.getElementById('svc-emoji').value.trim() || name;
+  const r = await api('/api/admin/vault/service', { method: 'POST', body: JSON.stringify({ tier, name, emoji }) });
+  if (r.error || r.ok === false) toast(r.error || 'Failed');
+  else { toast('Service ' + name + ' added'); document.getElementById('svc-name').value=''; refreshVault(); }
+});
+async function refreshGen() {
+  try {
+    const d = await api('/api/admin/gen');
+    const el = document.getElementById('gen-status');
+    if (!el) return;
+    el.textContent = 'FREE GEN\n' + JSON.stringify(d.fgen || {}, null, 2) +
+      '\n\nBOOSTER\n' + JSON.stringify(d.bgen || {}, null, 2) +
+      '\n\nPREMIUM\n' + JSON.stringify(d.pgen || {}, null, 2);
+  } catch (e) { toast('Gen load failed'); }
+}
+document.getElementById('gen-refresh')?.addEventListener('click', refreshGen);
+document.getElementById('gen-add')?.addEventListener('click', async () => {
+  const tier = document.getElementById('gen-tier').value;
+  const service = document.getElementById('gen-service').value.trim();
+  const lines = document.getElementById('gen-lines').value;
+  const r = await api('/api/admin/gen/add', { method: 'POST', body: JSON.stringify({ tier, service, lines }) });
+  if (r.error) toast(r.error);
+  else { toast('Gen +' + r.added + ' → ' + service); document.getElementById('gen-lines').value=''; refreshGen(); }
+});
+async function refreshCommands() {
+  try {
+    const d = await api('/api/admin/commands');
+    let text = 'PREFIX: ' + (d.prefix || '-') + '\n\n/ SLASH\n' + (d.slash || []).map(x => '/' + x).join(', ') + '\n';
+    for (const [k, arr] of Object.entries(d.prefixGroups || {})) {
+      text += '\n' + k.toUpperCase() + '\n' + (arr || []).join('\n') + '\n';
+    }
+    const el = document.getElementById('cmd-list');
+    if (el) el.textContent = text;
+    const bc = document.getElementById('bot-cmds');
+    if (bc) bc.textContent = (d.slash || []).map(x => '/' + x).join('  ·  ');
+  } catch (e) { toast('Commands load failed'); }
+}
+document.getElementById('cmd-refresh')?.addEventListener('click', refreshCommands);
 
 </script>
 </body>
