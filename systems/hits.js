@@ -1,7 +1,7 @@
 /**
- * Hits poster — server emojis :hit: :mail: :banned: etc.
- * Adding mixed/banned/unbanned/xbox/codes = website only (API).
- * Discord: -hit start | stop | stock
+ * Hits poster — clean embed, stars, luck ban, DashWho default skin
+ * -hit start | -hit start mixed | stop | stock
+ * Add via website only
  */
 const { EmbedBuilder } = require('discord.js');
 const dataStore = require('../utils/data');
@@ -9,8 +9,7 @@ const brand = require('../config/brand');
 const { E } = require('../utils/embeds');
 const { em } = require('./stocks');
 
-const DEFAULT_IGN = 'Notch';
-const NOTCH_UUID = '069a79f4-44e9-4726-a5be-f425402f2e10';
+const DEFAULT_IGN = 'DashWho';
 const POST_INTERVAL_MS = parseInt(process.env.HIT_POST_INTERVAL_MS || '5000', 10);
 
 const CHANNELS = {
@@ -46,6 +45,8 @@ function ensure() {
   if (!d.hits) d.hits = {};
   for (const k of Object.keys(HIT_TYPES)) if (!Array.isArray(d.hits[k])) d.hits[k] = [];
   if (typeof d.hitsRunning !== 'boolean') d.hitsRunning = false;
+  if (!Array.isArray(d.hitsActiveTypes)) d.hitsActiveTypes = Object.keys(HIT_TYPES);
+  if (typeof d.hitStarStep !== 'number') d.hitStarStep = 0;
   return d;
 }
 
@@ -73,8 +74,8 @@ function extractAccounts(text) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     if (trimmed.includes(' ') && /@/.test(trimmed)) {
-      for (const t of trimmed.split(/\s+/)) {
-        const c = parseCombo(t);
+      for (const tok of trimmed.split(/\s+/)) {
+        const c = parseCombo(tok);
         if (c) out.push(c);
       }
     } else {
@@ -85,35 +86,54 @@ function extractAccounts(text) {
   return out;
 }
 
-function statusForType(type) {
-  if (type === 'hypixel_banned') return { hypixel: 'Banned', donut: 'Banned' };
-  if (type === 'hypixel_unbanned') return { hypixel: 'Unbanned', donut: 'Unbanned' };
-  if (type === 'mixed') return { hypixel: 'Mixed', donut: 'Unknown' };
-  return { hypixel: 'N/A', donut: 'N/A' };
+function nextStarCount() {
+  const d = ensure();
+  const filled = 5 - (d.hitStarStep % 5);
+  d.hitStarStep = (d.hitStarStep + 1) % 5;
+  dataStore.save();
+  return filled;
+}
+
+function formatStars(guild, count) {
+  const n = count || 5;
+  const star = ic(guild, 'starss');
+  return (star + ' ').repeat(n).trim();
+}
+
+function luckStatus(type) {
+  if (type === 'hypixel_banned') return { hypixel: 'banned', donut: 'banned' };
+  if (type === 'hypixel_unbanned') return { hypixel: 'unbanned', donut: 'unbanned' };
+  if (type === 'xbox' || type === 'xbox_codes') return { hypixel: 'n/a', donut: 'n/a' };
+  const r = Math.random() * 100;
+  if (r < 50) return { hypixel: 'banned', donut: 'banned' };
+  if (r < 75) return { hypixel: 'banned', donut: 'unbanned' };
+  if (r < 90) return { hypixel: 'unbanned', donut: 'banned' };
+  return { hypixel: 'unbanned', donut: 'unbanned' };
+}
+
+function randomPlaytime() {
+  return Math.floor(Math.random() * 800) + 1 + 'h';
+}
+
+function randomMoney() {
+  if (Math.random() < 0.35) return 'N/A';
+  return '$' + (Math.floor(Math.random() * 500000) + 100).toLocaleString();
 }
 
 function makeRecord(acc, type, meta = {}) {
   const hasName = !!(acc.username && String(acc.username).trim());
-  const st = statusForType(type);
+  const st = luckStatus(type);
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     email: acc.email,
     password: acc.password,
     name: hasName ? String(acc.username).trim() : DEFAULT_IGN,
-    uuid: hasName ? null : NOTCH_UUID,
     type,
     hypixel: st.hypixel,
     donut: st.donut,
-    canChangeName: 'False',
-    hypixelLevel: 'N/A',
-    hypixelKarma: 'N/A',
-    donutBalance: 'N/A',
-    donutPlaytime: 'N/A',
-    donutShards: 'N/A',
-    donutKills: 'N/A',
-    donutDeaths: 'N/A',
-    capes: 'Pan',
-    accountType: 'Normal',
+    playtime: randomPlaytime(),
+    money: randomMoney(),
+    rating: nextStarCount(),
     addedAt: Date.now(),
     addedBy: meta.addedBy || null
   };
@@ -130,15 +150,12 @@ function queueAdd(type, accounts, meta = {}) {
   return n;
 }
 
-/** Website / API: body { type, lines: "email:pass\\n..." or combos: [] } */
 function addFromWebsite(typeRaw, textOrList, meta = {}) {
   const type = resolveType(typeRaw);
   if (!type) return { ok: false, error: 'bad type' };
   let accounts = [];
   if (Array.isArray(textOrList)) {
-    accounts = textOrList
-      .map((x) => (typeof x === 'string' ? parseCombo(x) : x))
-      .filter(Boolean);
+    accounts = textOrList.map((x) => (typeof x === 'string' ? parseCombo(x) : x)).filter(Boolean);
   } else {
     accounts = extractAccounts(String(textOrList || ''));
   }
@@ -154,79 +171,55 @@ function countAll() {
   return o;
 }
 
-function skinUrl(uuid, name) {
-  if (uuid) return `https://crafatar.com/renders/body/${String(uuid).replace(/-/g, '')}?overlay=true&scale=6`;
-  if (name && name !== DEFAULT_IGN) return `https://mc-heads.net/body/${encodeURIComponent(name)}/128`;
-  return `https://crafatar.com/renders/body/${NOTCH_UUID.replace(/-/g, '')}?overlay=true&scale=6`;
+function skinUrl(name) {
+  return 'https://mc-heads.net/body/' + encodeURIComponent(name || DEFAULT_IGN) + '/180';
 }
-function avatarUrl(uuid, name) {
-  if (uuid) return `https://crafatar.com/avatars/${String(uuid).replace(/-/g, '')}?overlay=true&size=128`;
-  if (name) return `https://mc-heads.net/avatar/${encodeURIComponent(name)}/128`;
-  return `https://crafatar.com/avatars/${NOTCH_UUID.replace(/-/g, '')}?overlay=true&size=128`;
+function avatarUrl(name) {
+  return 'https://mc-heads.net/avatar/' + encodeURIComponent(name || DEFAULT_IGN) + '/128';
 }
 
-function ynLine(guild, status) {
+function banLine(guild, status) {
   const s = String(status || '').toLowerCase();
-  if (s.includes('unban')) return `${ic(guild, 'unbanned')} Unbanned`;
-  if (s.includes('ban')) return `${ic(guild, 'banned')} Banned`;
-  if (s.includes('mixed')) return `${ic(guild, 'mixed')} Mixed`;
+  if (s === 'banned') return ic(guild, 'ban') + ' Banned';
+  if (s === 'unbanned') return ic(guild, 'unban') + ' Unbanned';
   return 'N/A';
 }
 
 function buildHitEmbed(hit, guild) {
   const t = HIT_TYPES[hit.type] || HIT_TYPES.mixed;
   const ign = hit.name || DEFAULT_IGN;
-  const combo = `${hit.email}:${hit.password}`;
-  const typeIcon = ic(guild, t.emojiName);
+  const combo = hit.email + ':' + hit.password;
+  const stars = formatStars(guild, hit.rating || 5);
 
   const desc = [
-    `### ${ic(guild, 'hit')} ${ign}`,
+    '### ' + ic(guild, 'hit') + ' `' + ign + '`',
     '',
-    `${ic(guild, 'mail')} **Email**`,
-    `||\`\`\`${hit.email}\`\`\`||`,
-    `${ic(guild, 'password')} **Password**`,
-    `||\`\`\`${hit.password}\`\`\`||`,
+    ic(guild, 'mail') + ' **Email**',
+    '||' + hit.email + '||',
+    ic(guild, 'password') + ' **Password**',
+    '||' + hit.password + '||',
     '',
-    `${ic(guild, 'banned')} **Hypixel Banned**`,
-    ynLine(guild, hit.hypixel),
-    `${ic(guild, 'hypixel')} **Hypixel Name**`,
-    ign,
-    `${ic(guild, 'loading')} **Can Change Name**`,
-    hit.canChangeName || 'False',
-    `${ic(guild, 'ms-coin')} **Hypixel Level**`,
-    hit.hypixelLevel || 'N/A',
-    `${ic(guild, 'hypixel')} **Hypixel Karma**`,
-    hit.hypixelKarma || 'N/A',
+    ic(guild, 'hypixel') + ' **Hypixel** · ' + banLine(guild, hit.hypixel),
+    '⏱️ **Playtime** · ' + (hit.playtime || 'N/A'),
+    ic(guild, 'donut') + ' **Donut** · ' + banLine(guild, hit.donut),
+    ic(guild, 'money') + ' **Money** · ' + (hit.money || 'N/A'),
     '',
-    `${ic(guild, 'donut')} **Donut SMP Banned**`,
-    ynLine(guild, hit.donut),
-    `${ic(guild, 'donut')} **Donut SMP Balance**`,
-    hit.donutBalance || '$N/A',
-    `${ic(guild, 'donut')} **Donut SMP PlayTime**`,
-    hit.donutPlaytime || 'N/A',
-    `${ic(guild, 'donut')} **Donut SMP Shards**`,
-    hit.donutShards || 'N/A',
-    `${ic(guild, 'donut')} **Donut SMP Kills**`,
-    hit.donutKills || 'N/A',
-    `${ic(guild, 'donut')} **Donut SMP Deaths**`,
-    hit.donutDeaths || 'N/A',
+    '✨ **Account rated**',
+    stars,
     '',
-    `${ic(guild, 'capes')} **Capes**`,
-    hit.capes || 'Pan',
-    `${ic(guild, 'account')} **Account Type**`,
-    hit.accountType || 'Normal',
-    `${ic(guild, 'combo')} **Combo**`,
-    `||\`\`\`${combo}\`\`\`||`,
-    '',
-    `*${brand.footer || 'Coded by DashWho · Enhanced by DakshBro'}*`
+    ic(guild, 'combo') + ' **Combo**',
+    '||' + combo + '||'
   ].join('\n');
 
   return new EmbedBuilder()
-    .setColor(hit.type === 'hypixel_banned' ? 0xed4245 : hit.type === 'hypixel_unbanned' ? 0x57f287 : 0x5865f2)
-    .setTitle(`${typeIcon} ${t.label}`)
+    .setColor(
+      hit.type === 'hypixel_banned' ? 0xed4245 : hit.type === 'hypixel_unbanned' ? 0x57f287 : 0x5865f2
+    )
+    .setTitle(ic(guild, t.emojiName) + ' ' + t.label)
     .setDescription(desc)
-    .setThumbnail(avatarUrl(hit.uuid, ign))
-    .setImage(skinUrl(hit.uuid, ign))
+    .setThumbnail(avatarUrl(ign))
+    .setImage(skinUrl(ign))
+    .setFooter({ text: 'Ultimate Rewards · DashMod' })
     .setTimestamp();
 }
 
@@ -236,11 +229,11 @@ let posterTimer = null;
 async function postOne(client, type) {
   const d = ensure();
   const queue = d.hits[type];
-  if (!queue?.length) return false;
+  if (!queue || !queue.length) return false;
   const hit = queue.shift();
   dataStore.save();
   const ch = await client.channels.fetch(HIT_TYPES[type].channel).catch(() => null);
-  if (!ch?.isTextBased?.()) {
+  if (!ch || !ch.isTextBased || !ch.isTextBased()) {
     queue.unshift(hit);
     dataStore.save();
     return false;
@@ -258,21 +251,33 @@ async function postOne(client, type) {
 
 async function tickPoster() {
   if (!posterClient || !ensure().hitsRunning) return;
-  for (const type of ['hypixel_banned', 'mixed', 'hypixel_unbanned', 'xbox', 'xbox_codes']) {
-    if (ensure().hits[type]?.length) {
+  const d = ensure();
+  const order = ['hypixel_banned', 'mixed', 'hypixel_unbanned', 'xbox', 'xbox_codes'];
+  const active = new Set(d.hitsActiveTypes || Object.keys(HIT_TYPES));
+  for (const type of order) {
+    if (!active.has(type)) continue;
+    if (d.hits[type] && d.hits[type].length) {
       await postOne(posterClient, type);
       return;
     }
   }
 }
 
-function startPoster(client) {
+function startPoster(client, types) {
   posterClient = client;
-  ensure().hitsRunning = true;
+  const d = ensure();
+  d.hitsRunning = true;
+  if (types && types.length) {
+    d.hitsActiveTypes = types.map((x) => resolveType(x) || x).filter((x) => HIT_TYPES[x]);
+  } else {
+    d.hitsActiveTypes = Object.keys(HIT_TYPES);
+  }
+  if (!d.hitsActiveTypes.length) d.hitsActiveTypes = Object.keys(HIT_TYPES);
   dataStore.save();
   if (posterTimer) clearInterval(posterTimer);
   posterTimer = setInterval(() => tickPoster().catch(() => {}), POST_INTERVAL_MS);
   tickPoster().catch(() => {});
+  return d.hitsActiveTypes;
 }
 
 function stopPoster() {
@@ -286,16 +291,21 @@ function stopPoster() {
 
 function stockEmbed(guild) {
   const counts = countAll();
-  const run = ensure().hitsRunning ? `${ic(guild, 'unbanned')} **RUNNING**` : `${ic(guild, 'banned')} **STOPPED**`;
+  const run = ensure().hitsRunning
+    ? ic(guild, 'unbanned') + ' **RUNNING**'
+    : ic(guild, 'banned') + ' **STOPPED**';
   const lines = Object.keys(HIT_TYPES).map((k) => {
     const t = HIT_TYPES[k];
-    return `${ic(guild, t.emojiName)} **${t.label}** → \`${counts[k]}\` · <#${t.channel}>`;
+    return ic(guild, t.emojiName) + ' **' + t.label + '** → `' + counts[k] + '` · <#' + t.channel + '>';
   });
   return E(
-    `${ic(guild, 'hit')} Hits`,
-    `${run} · every **${POST_INTERVAL_MS / 1000}s**\n\n${lines.join('\n')}\n\n` +
-      `\`-hit start\` · \`-hit stop\` · \`-hit stock\`\n` +
-      `➕ Add combos on the **website** (mixed / banned / unbanned / xbox / codes)`,
+    ic(guild, 'hit') + ' Hits',
+    run +
+      ' · every **' +
+      POST_INTERVAL_MS / 1000 +
+      's**\n\n' +
+      lines.join('\n') +
+      '\n\n`-hit start` (all) · `-hit start mixed` · `-hit stop` · `-hit stock`\n➕ Add on **website**',
     brand.gold
   );
 }
@@ -307,7 +317,7 @@ async function handleHitsMessage(message, client) {
   if (!content.startsWith(P)) return false;
   const args = content.slice(P.length).trim().split(/\s+/);
   const cmd = (args.shift() || '').toLowerCase();
-  if (!['hit', 'hits'].includes(cmd)) return false;
+  if (cmd !== 'hit' && cmd !== 'hits') return false;
 
   const { isStaff } = require('../utils/staff');
   const staff = isStaff(message.member);
@@ -325,9 +335,23 @@ async function handleHitsMessage(message, client) {
       await message.reply({ embeds: [E('Hits', 'Staff only.', brand.red)] });
       return true;
     }
-    startPoster(client || message.client);
+    const which = args[1] ? resolveType(args[1]) : null;
+    const active = startPoster(client || message.client, which ? [which] : null);
+    const label = which ? '**' + HIT_TYPES[which].label + '** only' : '**all pools**';
     await message.reply({
-      embeds: [E(`${ic(g, 'hit')} Hits`, `${ic(g, 'unbanned')} Started · **${POST_INTERVAL_MS / 1000}s**`, brand.green)]
+      embeds: [
+        E(
+          ic(g, 'hit') + ' Hits',
+          ic(g, 'unbanned') +
+            ' Started ' +
+            label +
+            ' · every **' +
+            POST_INTERVAL_MS / 1000 +
+            's**\n' +
+            active.map((k) => ic(g, HIT_TYPES[k].emojiName) + ' ' + HIT_TYPES[k].label).join('\n'),
+          brand.green
+        )
+      ]
     });
     return true;
   }
@@ -338,18 +362,18 @@ async function handleHitsMessage(message, client) {
       return true;
     }
     stopPoster();
-    await message.reply({ embeds: [E(`${ic(g, 'hit')} Hits`, `${ic(g, 'banned')} Stopped`, brand.gold)] });
+    await message.reply({
+      embeds: [E(ic(g, 'hit') + ' Hits', ic(g, 'banned') + ' Stopped', brand.gold)]
+    });
     return true;
   }
 
-  // add / cd blocked on Discord — website only
   if (sub === 'add' || sub === 'cd') {
     await message.reply({
       embeds: [
         E(
-          `${ic(g, 'hit')} Hits`,
-          `Adding **mixed / banned / unbanned / xbox / codes** is only on the **website** panel.\n` +
-            `Discord: \`-hit start\` · \`-hit stop\` · \`-hit stock\``,
+          ic(g, 'hit') + ' Hits',
+          'Add combos on the **website** Hits tab.\nDiscord: `-hit start` · `-hit start mixed` · `-hit stop` · `-hit stock`',
           brand.gold
         )
       ]
@@ -362,7 +386,7 @@ async function handleHitsMessage(message, client) {
 }
 
 function resumeHitsPoster(client) {
-  if (ensure().hitsRunning) startPoster(client);
+  if (ensure().hitsRunning) startPoster(client, ensure().hitsActiveTypes);
 }
 
 module.exports = {
