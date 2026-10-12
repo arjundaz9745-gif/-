@@ -11,6 +11,21 @@ const { em } = require('./stocks');
 
 const DEFAULT_IGN = 'DashWho';
 
+const SKIN_POOL = [
+  'xXShadowXx', 'BlueFlame92', 'PixelNomad', 'CraftyFox7', 'NovaPulse', 'IronWaffle',
+  'MapleDrift', 'SilentEcho3', 'JadeRaptor', 'CloudKoi', 'EmberLynx', 'FrostByte42',
+  'SolarMoth', 'NeonCactus', 'QuietStorm', 'AmberWolf9', 'TideRunner', 'CopperOwl',
+  'VioletSpark', 'GraniteBee', 'MistyCrow', 'LunarPebble', 'CrimsonYak', 'AzureMango',
+  'HoneyBadgerX', 'StormPetal', 'ObsidianRay', 'FernKnight', 'CometDuck', 'RubyNoodle',
+  'ZincPanda', 'GlacierFox', 'PebbleShark', 'IvoryMoss', 'TurboSnail', 'QuartzMoth',
+  'SagePixel', 'BrickOtter', 'VelvetCrab', 'OrchidBat', 'CinderGoose', 'PrismLlama',
+  'DustyKoala', 'NeonBison', 'PlumRaven', 'CoralViper', 'MintJaguar', 'AshPhoenix'
+];
+function pickRandomSkinName() {
+  return SKIN_POOL[Math.floor(Math.random() * SKIN_POOL.length)];
+}
+
+
 const crypto = require('crypto');
 
 /** Deterministic "random" skin id from email (always valid render) */
@@ -140,7 +155,7 @@ function makeRecord(acc, type, meta = {}) {
   const hasName = !!(acc.username && String(acc.username).trim());
   const st = luckStatus(type);
   const displayName = hasName ? String(acc.username).trim() : DEFAULT_IGN;
-  const skinId = hasName ? displayName : skinIdFromEmail(acc.email);
+  const skinId = hasName ? displayName : pickRandomSkinName();
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     email: acc.email,
@@ -199,13 +214,12 @@ function bareId(idOrName) {
 
 /** Discord-friendly skin renders (minotar + mc-heads always return an image) */
 function skinUrl(idOrName) {
-  const id = bareId(idOrName);
-  // Full body armor — reliable in Discord embeds
-  return 'https://minotar.net/armor/body/' + id + '/180.png';
+  const id = String(idOrName || pickRandomSkinName());
+  return 'https://mc-heads.net/body/' + encodeURIComponent(id) + '/180';
 }
 function avatarUrl(idOrName) {
-  const id = bareId(idOrName);
-  return 'https://minotar.net/helm/' + id + '/128.png';
+  const id = String(idOrName || pickRandomSkinName());
+  return 'https://mc-heads.net/avatar/' + encodeURIComponent(id) + '/128';
 }
 function skinForHit(hit) {
   return hit.skinId || hit.name || randomSkinId();

@@ -8,6 +8,19 @@ const { logProtect } = require('./protection');
 const protectedPings = new Map();
 const NO_PING_USER_IDS = ['1545107998060449803'];
 
+const NORMAL_RESET_MS = 20 * 60 * 1000; // 20 min
+const TICKET_RESET_MS = 60 * 60 * 1000; // 1 hour in tickets
+const MAX_PINGS = 2;
+
+function isTicketChannel(channel) {
+  const n = (channel?.name || '').toLowerCase();
+  return /^ticket[-_]/i.test(n) || /ticket-\d+/i.test(n);
+}
+
+function resetMs(channel) {
+  return isTicketChannel(channel) ? TICKET_RESET_MS : NORMAL_RESET_MS;
+}
+
 /** Never timeout staff or server owner — public warn instead */
 async function safeTimeout(member, ms, reason, channel) {
   if (!member) return { ok: false, reason: 'no member' };
@@ -26,7 +39,7 @@ async function safeTimeout(member, ms, reason, channel) {
           embeds: [
             E(
               'Staff warning',
-              `${member} is **staff** — timeout skipped.\nReason: **${reason}**\n*Staff are not timed out.*`,
+              `${member} is **staff** — timeout skipped.\nReason: **${reason}**`,
               brand.gold
             )
           ]
@@ -43,7 +56,7 @@ async function safeTimeout(member, ms, reason, channel) {
           embeds: [
             E(
               'Timeout',
-              `${member} was timed out.\n**Duration:** ${Math.round(ms / 60000)} minutes\n**Reason:** ${reason}`,
+              `${member} timed out **${Math.round(ms / 60000)}m** · ${reason}`,
               brand.red
             )
           ]
@@ -53,119 +66,118 @@ async function safeTimeout(member, ms, reason, channel) {
     return { ok: true };
   } catch (e) {
     if (channel) {
-      await channel
-        .send({ embeds: [E('Timeout failed', `${member}: ${e.message}`, brand.red)] })
-        .catch(() => {});
+      await channel.send({ embeds: [E('Timeout failed', `${member}: ${e.message}`, brand.red)] }).catch(() => {});
     }
     return { ok: false, reason: e.message };
   }
 }
 
-async function handleMentions(message) {
-  if (!message.mentions.users.size || isStaff(message.member)) return;
+/** Only enforce when target appears offline / invisible */
+function isInvisible(member) {
+  const s = member?.presence?.status;
+  // offline or null (no presence) treated as invisible
+  return !s || s === 'offline';
+}
 
-  // Pinging the bot → roast + 1h timeout
-  const botId = message.client?.user?.id;
-  if (botId && message.mentions.users.has(botId)) {
-    await message
-      .reply({
-        content: 'I am a moderator for this server not a member 😈',
-        allowedMentions: { parse: [] }
-      })
-      .catch(() => {});
-    await safeTimeout(message.member, 60 * 60 * 1000, 'Pinged the bot', message.channel);
-    await logProtect(
-      message.client,
-      message.guild,
-      'Bot ping',
-      `**${message.author.tag}** pinged the bot · 1h`
-    ).catch(() => {});
-    return;
+function pingKey(authorId, targetId, channelId) {
+  return `${authorId}:${targetId}:${channelId}`;
+}
+
+function getCount(authorId, targetId, channel) {
+  const key = pingKey(authorId, targetId, channel.id);
+  const row = protectedPings.get(key);
+  const window = resetMs(channel);
+  if (!row || Date.now() - row.at > window) {
+    protectedPings.set(key, { count: 0, at: Date.now() });
+    return 0;
   }
+  return row.count;
+}
 
-  // Special user: funny reply only
-  for (const id of NO_PING_USER_IDS) {
-    if (message.mentions.users.has(id)) {
+function bump(authorId, targetId, channel) {
+  const key = pingKey(authorId, targetId, channel.id);
+  const window = resetMs(channel);
+  const row = protectedPings.get(key);
+  if (!row || Date.now() - row.at > window) {
+    protectedPings.set(key, { count: 1, at: Date.now() });
+    return 1;
+  }
+  row.count += 1;
+  row.at = Date.now();
+  return row.count;
+}
+
+async function handleMentions(message) {
+  if (!message.mentions.users.size) return;
+  if (isStaff(message.member)) return;
+
+  const botId = message.client?.user?.id;
+
+  // No-ping special users (always)
+  for (const uid of NO_PING_USER_IDS) {
+    if (message.mentions.users.has(uid)) {
       await message
-        .reply({
-          content: `Bruhhh! Don't ping <@${id}>.`,
-          allowedMentions: { users: [] }
-        })
+        .reply({ content: `Bruhhh! Don't ping <@${uid}>.`, allowedMentions: { users: [] } })
         .catch(() => {});
     }
   }
 
-  const protectedIds = env.PROTECTED_USER_IDS || [];
-
-  for (const protId of protectedIds) {
-    if (NO_PING_USER_IDS.includes(protId)) continue;
-    if (!message.mentions.users.has(protId)) continue;
-
-    const target =
-      message.guild.members.cache.get(protId) ||
-      (await message.guild.members.fetch(protId).catch(() => null));
-
-    const display =
-      target?.displayName ||
-      target?.user?.globalName ||
-      target?.user?.username ||
-      message.mentions.users.get(protId)?.username ||
-      'Protected user';
-
-    const status = presenceLabel(target?.presence?.status || 'offline');
-    const key = `${message.author.id}:prot:${protId}`;
-    const now = Date.now();
-    let rec = protectedPings.get(key) || { count: 0, lastAt: 0 };
-    if (now - rec.lastAt > 30 * 60 * 1000) rec = { count: 0, lastAt: 0 };
-    rec.count++;
-    rec.lastAt = now;
-    protectedPings.set(key, rec);
-
-    if (rec.count === 1) {
-      await message.reply({
-        embeds: [
-          E(
-            'Ping notice',
-            `${message.author} **${display}** is currently **${status}** — they will reply soon.\n\n` +
-              `⚠ **Another ping will cause a 1 hour timeout.**`,
-            brand.gold
-          )
-        ]
-      });
-    } else {
-      await safeTimeout(
-        message.member,
-        env.PROTECTED_PING_TIMEOUT_MS || 60 * 60 * 1000,
-        `Repeated ping of ${display}`,
-        message.channel
-      );
-      protectedPings.set(key, { count: 0, lastAt: now });
-      await logProtect(
-        message.client,
-        message.guild,
-        'Ping protect',
-        `**${message.author.tag}** → **${display}**`
-      );
-    }
+  // Bot ping — only if you want; user asked invisible system for people
+  if (botId && message.mentions.users.has(botId)) {
+    await message
+      .reply({ content: 'I am a moderator for this server not a member 😈', allowedMentions: { parse: [] } })
+      .catch(() => {});
+    await safeTimeout(message.member, 60 * 60 * 1000, 'Pinged the bot', message.channel);
+    return;
   }
+
+  const protectedIds = String(process.env.PROTECTED_USER_IDS || env.PROTECTED_USER_IDS || '')
+    .split(/[,;\s]+/)
+    .filter(Boolean);
 
   for (const [uid] of message.mentions.users) {
     if (uid === message.author.id) continue;
     if (uid === botId) continue;
-    if (protectedIds.includes(uid)) continue;
     if (NO_PING_USER_IDS.includes(uid)) continue;
 
     const mem =
       message.guild.members.cache.get(uid) || (await message.guild.members.fetch(uid).catch(() => null));
     if (!mem) continue;
+
+    // ONLY when target is invisible / offline
+    if (!isInvisible(mem)) continue;
+
+    // Optional: also honor Ping=Mute status text
     const st = detectPingStatus(mem);
-    if (st === 'none') continue;
-    if (st === 'mute') {
-      await safeTimeout(message.member, 60 * 60 * 1000, `Ping = Mute (${mem.displayName})`, message.channel);
-    } else if (st === 'warn') {
-      await message.reply({
-        embeds: [E('Ping = warn', `${message.author} **${mem.displayName}** has **Ping = Warn**.`, brand.gold)]
-      });
+    if (st === 'none' && !protectedIds.includes(uid) && !isStaff(mem)) {
+      // only protected / staff-looking invisible users? User said ping system for invisible
+      // Apply to any invisible ping with max 2
+    }
+
+    const n = bump(message.author.id, uid, message.channel);
+    const windowLabel = isTicketChannel(message.channel) ? '1 hour' : '20 minutes';
+
+    if (n === 1) {
+      await message
+        .reply({
+          content: `Okay ${message.author}, **${mem.displayName}** looks offline/invisible.\nOne more ping → timeout. (resets in ${windowLabel}) 😈`,
+          allowedMentions: { users: [message.author.id] }
+        })
+        .catch(() => {});
+    } else if (n >= MAX_PINGS) {
+      await safeTimeout(
+        message.member,
+        60 * 60 * 1000,
+        `Pinged invisible user ${mem.displayName} (${n}x)`,
+        message.channel
+      );
+      protectedPings.delete(pingKey(message.author.id, uid, message.channel.id));
+      await logProtect(
+        message.client,
+        message.guild,
+        'Invisible ping',
+        `**${message.author.tag}** → **${mem.user.tag}** · ${n}x`
+      ).catch(() => {});
     }
   }
 }

@@ -1,3 +1,4 @@
+const dataStore = require('../utils/data');
 /**
  * Ultimate Rewards — Ticket + Paid Purchase system
  * NEW FILE ONLY — drop into systems/tickets.js
@@ -414,52 +415,7 @@ function registerTicketSystem(client) {
   });
 
   // Message: "@bot I am here..."
-  client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    if (!message.mentions.has(client.user)) return;
-    const content = message.content.toLowerCase();
-    if (!content.includes('i am here') && !content.includes("i'm here") && !content.includes('im here')) return;
-
-    // Must be in a ticket-like channel
-    const n = (message.channel.name || '').toLowerCase();
-    const isTicket =
-      n.includes('purchase') ||
-      n.includes('help') ||
-      n.includes('claim') ||
-      n.includes('false-mod') ||
-      n.includes('discord-issues') ||
-      n.includes('support') ||
-      (message.channel.topic && /ticket/i.test(message.channel.topic));
-    if (!isTicket) return;
-
-    // Optional: staff only
-    try {
-      const { isStaff } = require('../utils/staff');
-      if (!isStaff(message.member)) {
-        return message.reply({ content: 'Only staff can generate redeem codes.' });
-      }
-    } catch {}
-
-    const code = await makeCode(message.author.id, message.channel.id);
-    const embed = new EmbedBuilder()
-      .setColor(0x1abc9c)
-      .setTitle('🔑 One-time Redeem Code Generated')
-      .setDescription(
-        [
-          `**Your redeem code:** ***${code}***`,
-          `**Redeem on:** ***Web***`,
-          `${REDEEM_BASE_URL}`,
-          '',
-          'Sir, thank you for using our services.',
-          '• One-time · website only'
-        ].join('\n')
-      )
-      .setFooter({ text: 'Ultimate Rewards · Paid Purchase' })
-      .setTimestamp();
-
-    await message.reply({ embeds: [embed] });
-  });
-}
+  }
 
 // Prefix command helper:
 // -ticketpanel
@@ -498,36 +454,74 @@ async function handleTicketPanelCommand(message, args) {
 async function handlePaidCommand(message, args) {
   try {
     const { isStaff } = require('../utils/staff');
-    if (!isStaff(message.member)) {
-      return message.reply({ content: 'Staff only.' });
-    }
+    if (!isStaff(message.member)) return message.reply({ content: 'Staff only.' });
   } catch {
     if (!message.member?.permissions?.has?.('Administrator')) {
       return message.reply({ content: 'Staff only.' });
     }
   }
 
-  const item = (args || []).join(' ').trim();
-  if (!item) {
-    return message.reply({ content: '`-paid <item name>`\nExample: `-paid Minecraft MCFA`' });
+  const data = dataStore.get();
+  if (!data.paidItems) data.paidItems = {};
+  // seed defaults if empty
+  if (!Object.keys(data.paidItems).length) {
+    data.paidItems = {
+      mcfa: { label: 'MCFA', emoji: 'mcfa' },
+      mcnfa: { label: 'MCNFA', emoji: 'mcnfa' },
+      donut: { label: 'Donut', emoji: 'donut' },
+      hypixel: { label: 'Hypixel', emoji: 'hypixel' },
+      netflix: { label: 'Netflix', emoji: 'netflix' }
+    };
+    dataStore.save();
   }
 
-  const code = await makeCode(message.author.id, message.channel.id);
-  const site = (REDEEM_BASE_URL || '').replace(/\/$/, '') || 'our website';
+  const raw = (args || []).join(' ').trim();
+  if (!raw) {
+    const { em } = require('./stocks');
+    const lines = Object.entries(data.paidItems).map(([k, v]) => {
+      const ic = em(message.guild, v.emoji || k, `:${v.emoji || k}:`);
+      return `${ic} **${v.label || k}** — \`-paid ${k}\``;
+    });
+    return message.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0xf1c40f)
+          .setTitle('💎 Paid items')
+          .setDescription(lines.join('\n') || '_None — add on website_')
+          .setFooter({ text: 'Ultimate Rewards · Paid' })
+      ]
+    });
+  }
 
+  const key = raw.toLowerCase().replace(/\s+/g, '_');
+  const item =
+    data.paidItems[key] ||
+    Object.entries(data.paidItems).find(([k, v]) => (v.label || k).toLowerCase() === raw.toLowerCase())?.[1];
+  if (!item && !data.paidItems[key]) {
+    return message.reply({ content: `Unknown item. Use \`-paid\` to list. (Owners add items on the website.)` });
+  }
+  const meta = data.paidItems[key] || item;
+  const name = meta.label || key;
+  const { em } = require('./stocks');
+  const ic = em(message.guild, meta.emoji || key, `:${meta.emoji || key}:`);
+  const code = await makeCode(message.author.id, message.channel.id);
+
+  const site = (process.env.REDEEM_BASE_URL || '').replace(/\/$/, '') || 'our website';
   const embed = new EmbedBuilder()
     .setColor(0xf1c40f)
-    .setTitle(`# ${item.toUpperCase()}`)
+    .setTitle(`${ic} ${name.toUpperCase()}`)
     .setDescription(
       [
-        `**Your redeem code:** ***${code}***`,
-        `**Redeem on:** ***Web***`,
+        `${ic} **Redeem code**`,
+        `***${code}***`,
+        '',
+        `🌐 **Redeem on web**`,
         site,
         '',
-        'Sir, thank you for using our services.'
+        'Thank you for using **Ultimate Rewards** ❤️'
       ].join('\n')
     )
-    .setFooter({ text: 'Ultimate Rewards · Paid' })
+    .setFooter({ text: 'Ultimate Rewards · Paid · Coded by DashWho' })
     .setTimestamp();
 
   await message.channel.send({ embeds: [embed] });
