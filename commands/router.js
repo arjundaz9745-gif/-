@@ -103,7 +103,48 @@ async function handleCommand(message, client) {
   }
 
   // ── HELP ──
-    if (cmd === 'help' || cmd === 'commands') {
+    
+  if (cmd === 'auth') {
+    const authUsers = require('../systems/authUsers');
+    if (!authUsers.isPermanent(message.author.id)) {
+      await message.reply({ embeds: [E('Auth', 'Permanent admins only.', brand.red)] });
+      return true;
+    }
+    const user = message.mentions.users.first();
+    if (!user) {
+      await message.reply({ embeds: [E('Auth', '`-auth @user [1h|7d]` — omit time = unlimited', brand.gold)] });
+      return true;
+    }
+    const time = args.filter((a) => !a.startsWith('<@')).join(' ').trim() || null;
+    // args may be [@user, 1h] after shift
+    const timeArg = args.find((a) => /^\d/.test(a) || /[smhdw]$/i.test(a)) || null;
+    const r = authUsers.authorize(user.id, timeArg, message.author.id);
+    if (!r.ok) {
+      await message.reply({ embeds: [E('Auth', r.error || 'Failed', brand.red)] });
+      return true;
+    }
+    const when = r.unlimited ? '**unlimited**' : `<t:${Math.floor(r.expiresAt / 1000)}:R>`;
+    await message.reply({ embeds: [E('Auth', `Authorized ${user} · ${when}`, brand.green)] });
+    return true;
+  }
+  if (cmd === 'deauth') {
+    const authUsers = require('../systems/authUsers');
+    if (!authUsers.isPermanent(message.author.id)) {
+      await message.reply({ embeds: [E('Auth', 'Permanent admins only.', brand.red)] });
+      return true;
+    }
+    const user = message.mentions.users.first();
+    if (!user) {
+      await message.reply('`-deauth @user`');
+      return true;
+    }
+    const r = authUsers.revoke(user.id);
+    await message.reply({ embeds: [E('Auth', r.ok ? `Removed ${user}` : r.error, r.ok ? brand.green : brand.red)] });
+    return true;
+  }
+
+
+  if (cmd === 'help' || cmd === 'commands') {
     await message.reply({
       embeds: [
         E(brand.BOT_NAME + ' · Commands', [
