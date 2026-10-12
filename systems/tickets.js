@@ -421,8 +421,15 @@ function registerTicketSystem(client) {
     if (!content.includes('i am here') && !content.includes("i'm here") && !content.includes('im here')) return;
 
     // Must be in a ticket-like channel
-    const isTicket = message.channel.name.includes('purchase') ||
-      (message.channel.topic && message.channel.topic.includes('Ticket'));
+    const n = (message.channel.name || '').toLowerCase();
+    const isTicket =
+      n.includes('purchase') ||
+      n.includes('help') ||
+      n.includes('claim') ||
+      n.includes('false-mod') ||
+      n.includes('discord-issues') ||
+      n.includes('support') ||
+      (message.channel.topic && /ticket/i.test(message.channel.topic));
     if (!isTicket) return;
 
     // Optional: staff only
@@ -439,15 +446,12 @@ function registerTicketSystem(client) {
       .setTitle('🔑 One-time Redeem Code Generated')
       .setDescription(
         [
-          `**Redeem here:** ${REDEEM_BASE_URL}/#redeem  (or open Redeem section on website)`,
+          `**Your redeem code:** ***${code}***`,
+          `**Redeem on:** ***Web***`,
+          `${REDEEM_BASE_URL}`,
           '',
-          `**Redeem code:** \`${code}\``,
-          '',
-          '• Valid **only** on our website',
-          '• **One-time** use only',
-          '• Code looks like: `ZH26637FDHHS5638`',
-          '• Customer selects: NFA · MCFA · Netflix · Spotify · Crunchyroll · Minecraft',
-          '• Then enters this code → ticket is created & Discord ticket can be closed'
+          'Sir, thank you for using our services.',
+          '• One-time · website only'
         ].join('\n')
       )
       .setFooter({ text: 'Ultimate Rewards · Paid Purchase' })
@@ -485,10 +489,91 @@ async function handleTicketPanelCommand(message, args) {
   await message.reply({ content: 'Ticket panel posted.' }).then(m => setTimeout(() => m.delete().catch(() => {}), 3000));
 }
 
+
+
+/**
+ * -paid <item name>
+ * Staff only — one-time website redeem code (no  path).
+ */
+async function handlePaidCommand(message, args) {
+  try {
+    const { isStaff } = require('../utils/staff');
+    if (!isStaff(message.member)) {
+      return message.reply({ content: 'Staff only.' });
+    }
+  } catch {
+    if (!message.member?.permissions?.has?.('Administrator')) {
+      return message.reply({ content: 'Staff only.' });
+    }
+  }
+
+  const item = (args || []).join(' ').trim();
+  if (!item) {
+    return message.reply({ content: '`-paid <item name>`\nExample: `-paid Minecraft MCFA`' });
+  }
+
+  const code = await makeCode(message.author.id, message.channel.id);
+  const site = (REDEEM_BASE_URL || '').replace(/\/$/, '') || 'our website';
+
+  const embed = new EmbedBuilder()
+    .setColor(0xf1c40f)
+    .setTitle(`# ${item.toUpperCase()}`)
+    .setDescription(
+      [
+        `**Your redeem code:** ***${code}***`,
+        `**Redeem on:** ***Web***`,
+        site,
+        '',
+        'Sir, thank you for using our services.'
+      ].join('\n')
+    )
+    .setFooter({ text: 'Ultimate Rewards · Paid' })
+    .setTimestamp();
+
+  await message.channel.send({ embeds: [embed] });
+}
+
+/** Staff: list open ticket-like channels */
+async function handleTicketManageCommand(message) {
+  try {
+    const { isStaff } = require('../utils/staff');
+    if (!isStaff(message.member)) return message.reply({ content: 'Staff only.' });
+  } catch {
+    if (!message.member?.permissions?.has?.('Administrator')) {
+      return message.reply({ content: 'Staff only.' });
+    }
+  }
+
+  const catId = TICKET_CATEGORY_ID;
+  const channels = message.guild.channels.cache.filter(
+    (c) =>
+      c.type === ChannelType.GuildText &&
+      (c.parentId === catId ||
+        /help|claim|purchase|false-mod|discord|support|ticket/i.test(c.name || ''))
+  );
+
+  const list = [...channels.values()]
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+    .slice(0, 25)
+    .map((c, i) => `\`${i + 1}.\` ${c} — \`${c.name}\``)
+    .join('\n');
+
+  const embed = new EmbedBuilder()
+    .setColor(0x9b59b6)
+    .setTitle('🎫 Staff · Ticket management')
+    .setDescription(list || '_No open ticket-like channels found._')
+    .setFooter({ text: 'Close tickets with the Close button inside the channel' })
+    .setTimestamp();
+
+  await message.reply({ embeds: [embed] });
+}
+
 module.exports = {
   registerTicketSystem,
   sendTicketPanel,
   handleTicketPanelCommand,
+  handlePaidCommand,
+  handleTicketManageCommand,
   useCode,
   makeCode,
   loadCodes
