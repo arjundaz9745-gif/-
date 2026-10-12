@@ -34,7 +34,7 @@ const { startWebServer } = require('./web/server');
 const { registerAntiNuke } = require('./systems/antinuke');
 const { registerReactionRoles } = require('./systems/reactionRoles');
 const ttt = require('./systems/tictactoe');
-const { registerTicketSystem, handleTicketPanelCommand } = require('./systems/tickets');
+const { registerTicketSystem, handleTicketPanelCommand, handlePaidCommand, handleTicketManageCommand } = require('./systems/tickets');
 
 if (!env.TOKEN) {
   console.error('Missing DISCORD_BOT_TOKEN');
@@ -405,6 +405,14 @@ client.on('messageCreate', async (message) => {
     const cmd = (args.shift() || '').toLowerCase();
     if (cmd === 'ticketpanel' || cmd === 'ticket') {
       await handleTicketPanelCommand(message, args);
+      return;
+    }
+    if (cmd === 'paid') {
+      await handlePaidCommand(message, args);
+      return;
+    }
+    if (cmd === 'tickets' || cmd === 'ticketmanage' || cmd === 'tm') {
+      await handleTicketManageCommand(message);
       return;
     }
   }
