@@ -371,6 +371,24 @@ function startWebServer(client) {
           try { require('../systems/sync').scheduleExport(client, 'gen'); } catch (_) {}
           return json(res, 200, { ok: true, added: lines.length, service, tier, total: pool[service].length });
         }
+        
+        if (p === '/api/admin/paid' && req.method === 'GET') {
+          if (!data.paidItems) data.paidItems = {};
+          return json(res, 200, { items: data.paidItems });
+        }
+        if (p === '/api/admin/paid' && req.method === 'POST') {
+          const body = await readBody(req);
+          const key = String(body.key || body.name || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+          if (!key) return json(res, 400, { error: 'key required' });
+          if (!data.paidItems) data.paidItems = {};
+          data.paidItems[key] = {
+            label: body.label || key,
+            emoji: String(body.emoji || key).replace(/^:|:$/g, '')
+          };
+          dataStore.save();
+          return json(res, 200, { ok: true, items: data.paidItems });
+        }
+
         if (p === '/api/admin/commands' && req.method === 'GET') {
           return json(res, 200, {
             prefix: process.env.PREFIX || '-',
