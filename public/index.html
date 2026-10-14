@@ -157,6 +157,39 @@ textarea{min-height:90px;resize:vertical}
   box-shadow:0 12px 40px rgba(0,0,0,.4);display:none;
 }
 .toast.show{display:block}
+
+/* Spin wheel */
+.spin-wrap{display:flex;flex-direction:column;align-items:center;gap:16px;margin:16px 0}
+.spin-stage{position:relative;width:min(320px,90vw);height:min(320px,90vw)}
+.spin-pointer{position:absolute;top:-8px;left:50%;transform:translateX(-50%);z-index:5;font-size:28px;filter:drop-shadow(0 2px 4px #000)}
+.spin-wheel{
+  width:100%;height:100%;border-radius:50%;
+  border:6px solid rgba(26,188,156,.55);
+  box-shadow:0 0 0 8px rgba(0,0,0,.25),0 12px 40px rgba(0,0,0,.45);
+  background:conic-gradient(
+    #1abc9c 0deg 45deg,#3498db 45deg 90deg,#9b59b6 90deg 135deg,#e74c3c 135deg 180deg,
+    #f39c12 180deg 225deg,#2ecc71 225deg 270deg,#e91e63 270deg 315deg,#00bcd4 315deg 360deg
+  );
+  transition:transform 4s cubic-bezier(.17,.67,.12,1);
+  position:relative;overflow:hidden
+}
+.spin-wheel.spinning{/* class toggle for animation */}
+.spin-center{
+  position:absolute;inset:28%;border-radius:50%;
+  background:rgba(12,14,20,.92);border:3px solid rgba(255,255,255,.12);
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  font-weight:700;font-size:.85rem;padding:8px;z-index:3
+}
+.spin-chips{display:flex;flex-wrap:wrap;gap:6px;min-height:40px;padding:8px;border-radius:12px;background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.1);width:100%}
+.spin-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 10px 4px 4px;
+  border-radius:20px;background:#5865f2;color:#fff;font-size:.85rem
+}
+.spin-chip img{width:22px;height:22px;border-radius:50%}
+.spin-chip button{background:0;border:0;color:#fff;cursor:pointer;opacity:.8;font-size:14px}
+.spin-input-row{display:flex;gap:8px;width:100%}
+.spin-input-row input{flex:1;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(0,0,0,.35);color:#fff}
+
 </style>
 </head>
 <body>
@@ -186,6 +219,7 @@ textarea{min-height:90px;resize:vertical}
       <button data-tab="vault">Vault stock</button>
       <button data-tab="gen">Gen stock</button>
             <button data-tab="protection">Protection</button>
+      <button data-tab="spin">Spin</button>
       <button data-tab="giveaways">Giveaways</button>
       <button data-tab="invites">Invites & Messages</button>
       <button data-tab="sync">Sync / Export</button>
@@ -384,6 +418,34 @@ textarea{min-height:90px;resize:vertical}
           <div class="toggle"><span>Anti-nuke</span><button class="switch" id="sw-antinuke"></button></div>
           <div class="row" style="margin-top:14px">
             <button class="btn btn-primary" id="save-prot" style="width:auto">Save protection</button>
+          </div>
+        </div>
+      </section>
+
+      
+      <section id="tab-spin" class="hidden">
+        <div class="panel glass">
+          <h4>🎡 Spin wheel</h4>
+          <p style="font-size:.88rem;color:var(--muted);margin-bottom:12px">
+            Add users like Discord: type <code>@username</code> or paste user ID, then Spin.
+            Same as <code>-spin</code> in Discord (max 100).
+          </p>
+          <div class="spin-wrap">
+            <div class="spin-stage">
+              <div class="spin-pointer">▼</div>
+              <div class="spin-wheel" id="spin-wheel"></div>
+              <div class="spin-center" id="spin-center">Ready</div>
+            </div>
+            <div class="spin-chips" id="spin-chips"></div>
+            <div class="spin-input-row">
+              <input id="spin-user-input" placeholder="@username or user ID" />
+              <button class="btn" type="button" id="spin-add-user">Add</button>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn" type="button" id="spin-go">Spin</button>
+              <button class="btn btn-ghost" type="button" id="spin-clear">Clear</button>
+            </div>
+            <div id="spin-result" style="font-size:1rem;font-weight:600;min-height:1.4em"></div>
           </div>
         </div>
       </section>
@@ -969,6 +1031,63 @@ async function refreshCommands() {
   } catch (e) { toast('Commands load failed'); }
 }
 document.getElementById('cmd-refresh')?.addEventListener('click', refreshCommands);
+
+
+
+/* ---- Spin wheel (dashboard) ---- */
+const spinPlayers = [];
+function renderSpinChips() {
+  const box = document.getElementById('spin-chips');
+  if (!box) return;
+  box.innerHTML = spinPlayers.map((p, i) =>
+    `<span class="spin-chip"><img src="${p.avatar || 'https://cdn.discordapp.com/embed/avatars/0.png'}" alt=""/><span>@${p.name}</span><button type="button" data-i="${i}" aria-label="remove">×</button></span>`
+  ).join('');
+  box.querySelectorAll('button[data-i]').forEach(btn => {
+    btn.onclick = () => { spinPlayers.splice(+btn.dataset.i, 1); renderSpinChips(); };
+  });
+}
+document.getElementById('spin-add-user')?.addEventListener('click', async () => {
+  const inp = document.getElementById('spin-user-input');
+  let raw = (inp?.value || '').trim();
+  if (!raw) return;
+  raw = raw.replace(/^@/, '');
+  try {
+    const r = await api('/api/admin/spin/resolve?q=' + encodeURIComponent(raw));
+    if (!r || !r.id) return toast(r?.error || 'User not found');
+    if (spinPlayers.some(p => p.id === r.id)) return toast('Already added');
+    if (spinPlayers.length >= 100) return toast('Max 100');
+    spinPlayers.push({ id: r.id, name: r.name || raw, avatar: r.avatar });
+    inp.value = '';
+    renderSpinChips();
+  } catch (e) { toast('Resolve failed'); }
+});
+document.getElementById('spin-clear')?.addEventListener('click', () => {
+  spinPlayers.length = 0;
+  renderSpinChips();
+  document.getElementById('spin-result').textContent = '';
+  document.getElementById('spin-center').textContent = 'Ready';
+  document.getElementById('spin-wheel').style.transform = 'rotate(0deg)';
+});
+document.getElementById('spin-go')?.addEventListener('click', () => {
+  if (spinPlayers.length < 2) return toast('Add at least 2 users');
+  const wheel = document.getElementById('spin-wheel');
+  const center = document.getElementById('spin-center');
+  const result = document.getElementById('spin-result');
+  const winner = spinPlayers[Math.floor(Math.random() * spinPlayers.length)];
+  const extra = 5 + Math.floor(Math.random() * 4); // full turns
+  const deg = extra * 360 + Math.floor(Math.random() * 360);
+  center.textContent = '…';
+  result.textContent = '';
+  wheel.style.transition = 'none';
+  wheel.style.transform = 'rotate(0deg)';
+  void wheel.offsetWidth;
+  wheel.style.transition = 'transform 4s cubic-bezier(.17,.67,.12,1)';
+  wheel.style.transform = 'rotate(' + deg + 'deg)';
+  setTimeout(() => {
+    center.textContent = '@' + winner.name;
+    result.innerHTML = '🎉 Winner: <strong>@' + winner.name + '</strong>';
+  }, 4100);
+});
 
 </script>
 </body>
