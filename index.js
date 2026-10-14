@@ -17,7 +17,12 @@ const { parseDuration } = require('./utils/duration');
 const { addMessageCount, ensureInviteStats, buildInviteEmbed } = require('./systems/invites');
 const { trackWindow, spamTracker, joinTracker, getProtection, logProtect } = require('./systems/protection');
 const { handleMentions } = require('./systems/pingProtect');
+// web dashboard can resolve users
+global.__dashmodClient = null;
+const promoteSys = require('./systems/promote');
+const spinSys = require('./systems/spin');
 const { askAI } = require('./systems/ai');
+const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
 const { handleBackupMessage, handleBackupInteraction, applyPendingMemberRoles } = require('./systems/serverBackup');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
@@ -120,15 +125,6 @@ async function onReady() {
         .setName('game')
         .setDescription('Play Tic Tac Toe')
         .addUserOption((o) => o.setName('user').setDescription('Opponent').setRequired(true)),
-      new SlashCommandBuilder()
-        .setName('auth')
-        .setDescription('Authorize a user for /premium and vault (permanent admins only)')
-        .addUserOption((o) => o.setName('user').setDescription('User to authorize').setRequired(true))
-        .addStringOption((o) => o.setName('time').setDescription('Optional duration e.g. 1h 7d — omit = unlimited')),
-      new SlashCommandBuilder()
-        .setName('deauth')
-        .setDescription('Remove temporary authorization')
-        .addUserOption((o) => o.setName('user').setDescription('User').setRequired(true)),
       new SlashCommandBuilder().setName('stock').setDescription('View free + premium vault stock'),
       new SlashCommandBuilder().setName('payouts').setDescription('Payout / legit stats'),
       new SlashCommandBuilder()
@@ -379,7 +375,6 @@ client.on('messageCreate', async (message) => {
     return;
   }
   try {
-    if (await stockVault.handlePendingAdd?.(message)) return;
     if (await stockVault.handleLegitReply(message)) return;
     if (await stockVault.handleVouchMessage(message)) return;
     if (await stockVault.handleStockCommands(message)) return;
@@ -387,6 +382,7 @@ client.on('messageCreate', async (message) => {
 
   if (await handleGenMessage(message, client).catch((e) => { console.error('gen', e.message); return false; })) return;
   if (await handleBackupMessage(message, client).catch((e) => { console.error('backup', e.message); return false; })) return;
+  if (await handleIAmHere(message).catch(() => false)) return;
 
   const aiCh = data.aiChannelId || env.AI_CHANNEL_ID;
   if (aiCh && message.channel.id === aiCh && !message.content.startsWith(brand.PREFIX)) {
@@ -566,41 +562,6 @@ client.on('interactionCreate', async (interaction) => {
     if (name === 'free' || name === 'premium') {
       // staff only deliver via telling them to use prefix for now
       return reply({ content: `Use \`-${name} ${interaction.options.getString('service')}\` in the ticket (staff).`, ephemeral: true });
-    }
-
-    
-    if (name === 'auth') {
-      const authUsers = require('./systems/authUsers');
-      if (!authUsers.isPermanent(interaction.user.id)) {
-        return reply({ content: 'Only permanent admins can use /auth.', ephemeral: true });
-      }
-      const user = interaction.options.getUser('user', true);
-      const time = interaction.options.getString('time');
-      const r = authUsers.authorize(user.id, time, interaction.user.id);
-      if (!r.ok) return reply({ content: r.error || 'Failed', ephemeral: true });
-      if (r.permanent) return reply({ content: `${user} is already a **permanent** admin.`, ephemeral: true });
-      const when = r.unlimited ? '**unlimited**' : `<t:${Math.floor(r.expiresAt / 1000)}:R>`;
-      return reply({ content: `Authorized ${user} for premium/vault · ${when}`, ephemeral: false });
-    }
-    if (name === 'deauth') {
-      const authUsers = require('./systems/authUsers');
-      if (!authUsers.isPermanent(interaction.user.id)) {
-        return reply({ content: 'Only permanent admins can use /deauth.', ephemeral: true });
-      }
-      const user = interaction.options.getUser('user', true);
-      const r = authUsers.revoke(user.id);
-      if (!r.ok) return reply({ content: r.error || 'Failed', ephemeral: true });
-      return reply({ content: `Removed auth for ${user}.`, ephemeral: false });
-    }
-    if (name === 'premium') {
-      const authUsers = require('./systems/authUsers');
-      if (!authUsers.isAuthorized(interaction.user.id)) {
-        return reply({ content: 'Not authorized. Ask a permanent admin to `/auth` you.', ephemeral: true });
-      }
-      return reply({
-        content: `Use \`-premium <service>\` or \`-padd <service> email:pass:User\` in the ticket.\nYou are authorized.`,
-        ephemeral: true
-      });
     }
 
     if (name === 'help') return reply({ embeds: [E(brand.BOT_NAME, `Prefix \`${brand.PREFIX}\` · \`${brand.PREFIX}help\``)], ephemeral: true });
