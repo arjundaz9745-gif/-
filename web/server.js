@@ -224,6 +224,41 @@ function startWebServer(client) {
           return json(res, 200, await importFromChannel(ch));
         }
 
+        
+        if (p === '/api/admin/spin/resolve' && req.method === 'GET') {
+          const q = (url.searchParams.get('q') || '').trim().replace(/^@/, '');
+          if (!q) return json(res, 400, { error: 'Missing q' });
+          const client = global.__dashmodClient || null;
+          if (!client) return json(res, 503, { error: 'Bot offline' });
+          let user = null;
+          if (/^\d{15,22}$/.test(q)) {
+            user = await client.users.fetch(q).catch(() => null);
+          }
+          if (!user) {
+            // search mutual guilds by username
+            for (const g of client.guilds.cache.values()) {
+              await g.members.fetch().catch(() => null);
+              const m = g.members.cache.find(
+                (x) =>
+                  x.user.username.toLowerCase() === q.toLowerCase() ||
+                  (x.displayName && x.displayName.toLowerCase() === q.toLowerCase()) ||
+                  (x.user.globalName && x.user.globalName.toLowerCase() === q.toLowerCase())
+              );
+              if (m) {
+                user = m.user;
+                break;
+              }
+            }
+          }
+          if (!user) return json(res, 404, { error: 'User not found' });
+          return json(res, 200, {
+            id: user.id,
+            name: user.globalName || user.username,
+            avatar: user.displayAvatarURL({ size: 64, extension: 'png' })
+          });
+        }
+
+
         if (p === '/api/admin/bot' && req.method === 'GET') {
           const upMs = Date.now() - (runtimeLog.getStartedAt?.() || Date.now() - process.uptime() * 1000);
           const upSec = Math.floor(process.uptime());
@@ -371,24 +406,6 @@ function startWebServer(client) {
           try { require('../systems/sync').scheduleExport(client, 'gen'); } catch (_) {}
           return json(res, 200, { ok: true, added: lines.length, service, tier, total: pool[service].length });
         }
-        
-        if (p === '/api/admin/paid' && req.method === 'GET') {
-          if (!data.paidItems) data.paidItems = {};
-          return json(res, 200, { items: data.paidItems });
-        }
-        if (p === '/api/admin/paid' && req.method === 'POST') {
-          const body = await readBody(req);
-          const key = String(body.key || body.name || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
-          if (!key) return json(res, 400, { error: 'key required' });
-          if (!data.paidItems) data.paidItems = {};
-          data.paidItems[key] = {
-            label: body.label || key,
-            emoji: String(body.emoji || key).replace(/^:|:$/g, '')
-          };
-          dataStore.save();
-          return json(res, 200, { ok: true, items: data.paidItems });
-        }
-
         if (p === '/api/admin/commands' && req.method === 'GET') {
           return json(res, 200, {
             prefix: process.env.PREFIX || '-',
