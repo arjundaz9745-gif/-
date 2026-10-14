@@ -14,7 +14,7 @@ const dataStore = require('./utils/data');
 const { isStaff } = require('./utils/staff');
 const { E } = require('./utils/embeds');
 const { parseDuration } = require('./utils/duration');
-const { addMessageCount, ensureInviteStats, buildInviteEmbed } = require('./systems/invites');
+const { addMessageCount, ensureInviteStats, buildInviteEmbed, buildMessagesEmbed, tryReplaceFalconInvite } = require('./systems/invites');
 const { trackWindow, spamTracker, joinTracker, getProtection, logProtect } = require('./systems/protection');
 const { handleMentions } = require('./systems/pingProtect');
 // web dashboard can resolve users
@@ -26,7 +26,7 @@ const { handleIAmHere } = require('./systems/redeem');
 const { handleGenMessage } = require('./systems/genCommands');
 const { handleBackupMessage, handleBackupInteraction, applyPendingMemberRoles } = require('./systems/serverBackup');
 const { importFromChannel, scheduleExport } = require('./systems/sync');
-const { giveawayEmbed, giveawayRow, endGiveaway } = require('./systems/giveaways');
+const { giveawayEmbed, giveawayRow, endGiveaway, startGiveawayChecker } = require('./systems/giveaways');
 const { isSbanActive, addSban, removeSban, isTimeoutExempt } = require('./systems/sban');
 const runtimeLog = require('./systems/runtimeLog');
 const { handleCommand } = require('./commands/router');
@@ -66,6 +66,7 @@ async function onReady() {
   try { runtimeLog.markStart(); runtimeLog.info('Bot ready as ' + (client.user && client.user.tag)); } catch (_) {}
   console.log(`${brand.BOT_NAME} online as ${client.user.tag}`);
   try { resumeHitsPoster(client); } catch (_) {}
+  try { startGiveawayChecker(client); } catch (_) {}
   setInterval(() => { try { eventsSys.tickEvents(client); } catch (_) {} }, 30000);
   try {
     const cmds = [
@@ -146,10 +147,38 @@ async function onReady() {
         .setName('free')
         .setDescription('Take from free vault (staff)')
         .addStringOption((o) => o.setName('service').setDescription('mcfa / mcnfa / donut / hypixel').setRequired(true)),
+      
+      new SlashCommandBuilder()
+        .setName('promote')
+        .setDescription('Promote a staff member one rank')
+        .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('demote')
+        .setDescription('Demote a staff member one rank')
+        .addUserOption((o) => o.setName('user').setDescription('Member').setRequired(true)),
+      new SlashCommandBuilder()
+        .setName('spin')
+        .setDescription('Spin wheel')
+        .addStringOption((o) =>
+          o.setName('players').setDescription('Names or @mentions separated by space').setRequired(true)
+        ),
       new SlashCommandBuilder()
         .setName('premium')
-        .setDescription('Take from premium vault (staff)')
-        .addStringOption((o) => o.setName('service').setDescription('mcfa / mcnfa / donut / hypixel').setRequired(true)),
+        .setDescription('Premium vault')
+        .addSubcommand((s) =>
+          s
+            .setName('add')
+            .setDescription('Add stock email:pass:username')
+            .addStringOption((o) => o.setName('combo').setDescription('email:pass or email:pass:name').setRequired(true))
+            .addStringOption((o) => o.setName('service').setDescription('mcfa/donut/hypixel/...').setRequired(false))
+        )
+        .addSubcommand((s) =>
+          s
+            .setName('take')
+            .setDescription('Take from premium vault')
+            .addStringOption((o) => o.setName('service').setDescription('Service').setRequired(true))
+        ),
+
       new SlashCommandBuilder()
         .setName('hit')
         .setDescription('Hits poster')
@@ -309,6 +338,13 @@ client.on('messageDelete', async (message) => {
 });
 
 client.on('messageCreate', async (message) => {
+  // Replace Falcon (and similar) invite embeds with DashMod style
+  if (message.author?.bot) {
+    try {
+      if (await tryReplaceFalconInvite(message, client)) return;
+    } catch (_) {}
+  }
+
   // Anti-commands channel: members cannot use bot-style commands
   try {
     const antiCh = process.env.ANTI_CMD_CHANNEL_ID || '1557389786652741672';
@@ -565,6 +601,86 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (name === 'help') return reply({ embeds: [E(brand.BOT_NAME, `Prefix \`${brand.PREFIX}\` · \`${brand.PREFIX}help\``)], ephemeral: true });
+    
+    if (name === 'promote' || name === 'demote') {
+      const user = interaction.options.getUser('user');
+      const mem = await interaction.guild.members.fetch(user.id).catch(() => null);
+      if (!mem) return reply({ content: 'Member not found.', ephemeral: true });
+      // fake message-like for promoteSys
+      const fakeMsg = {
+        author: interaction.user,
+        member: interaction.member,
+        guild: interaction.guild,
+        channel: interaction.channel,
+        reply: (x) => reply(x),
+      };
+      await promoteSys.promote(fakeMsg, mem, name === 'demote');
+      return;
+    }
+    if (name === 'spin') {
+      const raw = interaction.options.getString('players') || '';
+      const args = raw.split(/\s+/).filter(Boolean);
+      const fakeMsg = {
+        author: interaction.user,
+        member: interaction.member,
+        guild: interaction.guild,
+        channel: interaction.channel,
+        mentions: { members: { values: () => [] }, roles: { values: () => [] } },
+        reply: (x) => interaction.followUp(x).catch(() => interaction.reply(x)),
+      };
+      await interaction.deferReply();
+      // collect mentions from resolved if any — names only from string
+      await spinSys.runSpin(
+        {
+          ...fakeMsg,
+          reply: async (x) => interaction.editReply(x),
+          channel: interaction.channel,
+          guild: interaction.guild,
+          author: interaction.user,
+          mentions: { members: { values: () => [] }, roles: { values: () => [] } },
+        },
+        args
+      );
+      return;
+    }
+    if (name === 'premium') {
+      const sub = interaction.options.getSubcommand();
+      const staffRole = process.env.STAFF_TEAM_ROLE_ID || '1548173330794815599';
+      const authRoles = new Set([
+        staffRole,
+        '1547183164185911356',
+        '1547183162457718847',
+        '1549036072909021285',
+        '1547183161300090950',
+        '1547183159794204675',
+      ]);
+      const isAuth =
+        interaction.member.permissions.has('Administrator') ||
+        interaction.member.roles.cache.some((r) => authRoles.has(r.id)) ||
+        ['1541659394188509215', '1080190046138802306'].includes(interaction.user.id);
+      if (!isAuth) return reply({ content: 'Staff only.', ephemeral: true });
+      if (sub === 'add') {
+        const combo = interaction.options.getString('combo');
+        const service = (interaction.options.getString('service') || 'mcfa').toLowerCase();
+        const stockVault = require('./systems/stockVault');
+        if (stockVault.addPremium) {
+          const n = stockVault.addPremium(service, combo);
+          return reply({ content: `Added to premium **${service}** (${n}).`, ephemeral: true });
+        }
+        // fallback data store
+        const dataStore = require('./utils/data');
+        const d = dataStore.get();
+        if (!d.premiumVault) d.premiumVault = {};
+        if (!d.premiumVault[service]) d.premiumVault[service] = [];
+        d.premiumVault[service].push(combo);
+        dataStore.save();
+        return reply({ content: `Added to premium **${service}**.`, ephemeral: true });
+      }
+      if (sub === 'take') {
+        // fall through to existing free/premium take if any
+      }
+    }
+
     if (name === 'invites') {
       const u = interaction.options.getUser('user') || interaction.user;
       return reply({ embeds: [buildInviteEmbed(u, interaction.guildId, interaction.user.username)] });
