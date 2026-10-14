@@ -427,7 +427,7 @@ textarea{min-height:90px;resize:vertical}
         <div class="panel glass">
           <h4>🎡 Spin wheel</h4>
           <p style="font-size:.88rem;color:var(--muted);margin-bottom:12px">
-            Add users like Discord: type <code>@username</code> or paste user ID, then Spin.
+            Type <strong>display names only</strong> (no IDs). Add each name, then Spin.
             Same as <code>-spin</code> in Discord (max 100).
           </p>
           <div class="spin-wrap">
@@ -438,7 +438,7 @@ textarea{min-height:90px;resize:vertical}
             </div>
             <div class="spin-chips" id="spin-chips"></div>
             <div class="spin-input-row">
-              <input id="spin-user-input" placeholder="@username or user ID" />
+              <input id="spin-user-input" placeholder="Name (e.g. DashWho)" />
               <button class="btn" type="button" id="spin-add-user">Add</button>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1046,20 +1046,15 @@ function renderSpinChips() {
     btn.onclick = () => { spinPlayers.splice(+btn.dataset.i, 1); renderSpinChips(); };
   });
 }
-document.getElementById('spin-add-user')?.addEventListener('click', async () => {
+document.getElementById('spin-add-user')?.addEventListener('click', () => {
   const inp = document.getElementById('spin-user-input');
-  let raw = (inp?.value || '').trim();
+  let raw = (inp?.value || '').trim().replace(/^@/, '');
   if (!raw) return;
-  raw = raw.replace(/^@/, '');
-  try {
-    const r = await api('/api/admin/spin/resolve?q=' + encodeURIComponent(raw));
-    if (!r || !r.id) return toast(r?.error || 'User not found');
-    if (spinPlayers.some(p => p.id === r.id)) return toast('Already added');
-    if (spinPlayers.length >= 100) return toast('Max 100');
-    spinPlayers.push({ id: r.id, name: r.name || raw, avatar: r.avatar });
-    inp.value = '';
-    renderSpinChips();
-  } catch (e) { toast('Resolve failed'); }
+  if (spinPlayers.some(p => p.name.toLowerCase() === raw.toLowerCase())) return toast('Already added');
+  if (spinPlayers.length >= 100) return toast('Max 100');
+  spinPlayers.push({ id: null, name: raw, avatar: 'https://cdn.discordapp.com/embed/avatars/' + (spinPlayers.length % 6) + '.png' });
+  inp.value = '';
+  renderSpinChips();
 });
 document.getElementById('spin-clear')?.addEventListener('click', () => {
   spinPlayers.length = 0;
