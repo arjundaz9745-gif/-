@@ -2,22 +2,33 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const dataStore = require('../utils/data');
 const brand = require('../config/brand');
 const { E } = require('../utils/embeds');
+const { em } = require('./stocks');
 const { isSbanActive } = require('./sban');
 
-function giveawayEmbed(g, ended = false) {
+function giveawayEmbed(g, ended = false, guild = null) {
   const mins = Math.ceil(Math.max(0, g.ends - Date.now()) / 60000);
+  const gift = em(guild, 'giveaway', '🎉');
+  const tick = em(guild, 'tick', '✅');
+  const star = em(guild, 'starss', '✨');
   return new EmbedBuilder()
-    .setColor(ended ? brand.dark : brand.gold)
-    .setTitle(ended ? 'Giveaway ended' : '🎉 Giveaway')
+    .setColor(ended ? brand.dark || 0x2b2d31 : brand.gold || 0xf1c40f)
+    .setTitle(ended ? `${tick} Giveaway ended` : `${gift} GIVEAWAY`)
     .setDescription(
-      `**Prize:** ${g.prize}\n**Winners:** ${g.winners}\n` +
-        (ended
+      [
+        `${star} **Prize:** ${g.prize}`,
+        `**Winners:** ${g.winners}`,
+        ended
           ? `**Winner(s):** ${g.winnerTags || 'None'}`
-          : `**Ends:** ~**${mins}m** · <t:${Math.floor(g.ends / 1000)}:R>`) +
-        `\n**Entries:** ${(g.entries || []).length}\n**Host:** <@${g.hostId}>`
+          : `**Ends:** <t:${Math.floor(g.ends / 1000)}:R> (~${mins}m)`,
+        '',
+        ended ? '' : `${em(guild, 'emoji_1', '🎈')} Click **Enter** to join!`,
+      ]
+        .filter(Boolean)
+        .join('\n')
     )
-    .setFooter({ text: brand.footer })
-    .setTimestamp();
+    .setImage(g.image || null)
+    .setFooter({ text: brand.footer || 'DashMod · Giveaway' })
+    .setTimestamp(ended ? new Date(g.ends) : new Date());
 }
 
 function giveawayRow(disabled = false) {
@@ -25,34 +36,79 @@ function giveawayRow(disabled = false) {
     new ButtonBuilder()
       .setCustomId('gw_enter')
       .setLabel('Enter')
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji('🎉')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(disabled),
+    new ButtonBuilder()
+      .setCustomId('gw_count')
+      .setLabel('Entries')
+      .setStyle(ButtonStyle.Secondary)
       .setDisabled(disabled)
   );
 }
 
-async function endGiveaway(client, messageId) {
+async function endGiveaway(client, g) {
   const data = dataStore.get();
-  const g = data.giveaways?.[messageId];
-  if (!g || g.ended) return;
+  if (!data.giveaways) data.giveaways = [];
   g.ended = true;
-  const pool = [...new Set(g.entries || [])].filter((id) => !isSbanActive(id));
-  const winners = [];
-  for (let i = 0; i < g.winners && pool.length; i++) {
-    winners.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
-  }
-  g.winnerTags = winners.length ? winners.map((id) => `<@${id}>`).join(', ') : 'No entries';
-  dataStore.save();
   const ch = await client.channels.fetch(g.channelId).catch(() => null);
-  if (!ch) return;
-  const msg = await ch.messages.fetch(messageId).catch(() => null);
-  if (msg) await msg.edit({ embeds: [giveawayEmbed(g, true)], components: [giveawayRow(true)] }).catch(() => {});
+  if (!ch) {
+    dataStore.save();
+    return;
+  }
+  const entries = (g.entries || []).filter(Boolean);
+  const winners = [];
+  const pool = [...entries];
+  for (let i = 0; i < (g.winners || 1) && pool.length; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    winners.push(pool.splice(idx, 1)[0]);
+  }
+  g.winnerIds = winners;
+  g.winnerTags = winners.length ? winners.map((id) => `<@${id}>`).join(', ') : 'None';
+  dataStore.save();
+
+  const gift = em(ch.guild, 'giveaway', '🎉');
+  const tick = em(ch.guild, 'tick', '✅');
+  try {
+    const msg = await ch.messages.fetch(g.messageId).catch(() => null);
+    if (msg) {
+      await msg.edit({
+        embeds: [giveawayEmbed(g, true, ch.guild)],
+        components: [giveawayRow(true)],
+      });
+    }
+  } catch (_) {}
+
   await ch
     .send({
-      content: winners.length ? `Congrats ${g.winnerTags}! Won **${g.prize}**` : 'No entries.',
-      embeds: [E('Giveaway result', g.winnerTags, brand.green)]
+      content: winners.length
+        ? `${gift} ${tick} **Giveaway ended!** Congratulations ${g.winnerTags} — you won **${g.prize}**!`
+        : `${gift} Giveaway ended — no valid entries for **${g.prize}**.`,
+      allowedMentions: { users: winners },
     })
-    .catch(() => {});
+    .catch(() => null);
 }
 
-module.exports = { giveawayEmbed, giveawayRow, endGiveaway, isSbanActive };
+function startGiveawayChecker(client) {
+  setInterval(async () => {
+    const data = dataStore.get();
+    if (!data.giveaways) return;
+    const now = Date.now();
+    for (const g of data.giveaways) {
+      if (g.ended) continue;
+      if (g.ends <= now) {
+        try {
+          await endGiveaway(client, g);
+        } catch (e) {
+          console.error('gw end', e.message);
+        }
+      }
+    }
+  }, 15000);
+}
+
+module.exports = {
+  giveawayEmbed,
+  giveawayRow,
+  endGiveaway,
+  startGiveawayChecker,
+};
