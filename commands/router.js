@@ -9,7 +9,7 @@ const { isStaff } = require('../utils/staff');
 const { stylish } = require('../utils/fonts');
 const { parseDuration } = require('../utils/duration');
 const dataStore = require('../utils/data');
-const { buildInviteEmbed, ensureInviteStats, inviteBreakdown } = require('../systems/invites');
+const { buildInviteEmbed, buildMessagesEmbed, ensureInviteStats, inviteBreakdown } = require('../systems/invites');
 const { exportToChannel, importFromChannel, scheduleExport } = require('../systems/sync');
 const { giveawayEmbed, giveawayRow, endGiveaway } = require('../systems/giveaways');
 const { addMapping, removeMapping, listForMessage } = require('../systems/reactionRoles');
@@ -157,7 +157,9 @@ async function handleCommand(message, client) {
   // ── INVITES ──
   if (cmd === 'i' || cmd === 'invites' || cmd === 'inv') {
     const u = message.mentions.users.first() || message.author;
-    await message.reply({ embeds: [buildInviteEmbed(u, message.guild.id, message.author.username)] });
+    await message.channel.send({
+      embeds: [buildInviteEmbed(u, message.guild.id, message.author.username, message.guild)],
+    });
     return true;
   }
   if (cmd === 'addinvite' || cmd === 'ainv') {
@@ -191,8 +193,11 @@ async function handleCommand(message, client) {
   // ── MESSAGES / LB ──
   if (cmd === 'm' || cmd === 'messages') {
     const u = message.mentions.users.first() || message.author;
-    const n = data.messages?.[message.guild.id]?.[u.id] || 0;
-    await message.reply({ embeds: [E('Messages', `**${u.username}** · **${n.toLocaleString()}**`)] });
+    const data = dataStore.get();
+    const n = (data.messages && data.messages[message.guild.id] && data.messages[message.guild.id][u.id]) || 0;
+    await message.channel.send({
+      embeds: [buildMessagesEmbed(u, n, message.author.username, message.guild)],
+    });
     return true;
   }
   if (cmd === 'lb' || cmd === 'leaderboard' || cmd === 'top') {
