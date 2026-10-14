@@ -11,33 +11,52 @@ const { em } = require('./stocks');
 
 const DEFAULT_IGN = 'DashWho';
 
-const SKIN_POOL = [
-  'xXShadowXx', 'BlueFlame92', 'PixelNomad', 'CraftyFox7', 'NovaPulse', 'IronWaffle',
-  'MapleDrift', 'SilentEcho3', 'JadeRaptor', 'CloudKoi', 'EmberLynx', 'FrostByte42',
-  'SolarMoth', 'NeonCactus', 'QuietStorm', 'AmberWolf9', 'TideRunner', 'CopperOwl',
-  'VioletSpark', 'GraniteBee', 'MistyCrow', 'LunarPebble', 'CrimsonYak', 'AzureMango',
-  'HoneyBadgerX', 'StormPetal', 'ObsidianRay', 'FernKnight', 'CometDuck', 'RubyNoodle',
-  'ZincPanda', 'GlacierFox', 'PebbleShark', 'IvoryMoss', 'TurboSnail', 'QuartzMoth',
-  'SagePixel', 'BrickOtter', 'VelvetCrab', 'OrchidBat', 'CinderGoose', 'PrismLlama',
-  'DustyKoala', 'NeonBison', 'PlumRaven', 'CoralViper', 'MintJaguar', 'AshPhoenix'
-];
-function pickRandomSkinName() {
-  return SKIN_POOL[Math.floor(Math.random() * SKIN_POOL.length)];
-}
-
-
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 
-/** Deterministic "random" skin id from email (always valid render) */
+/** Real-looking Minecraft names (varied skins on minotar/mc-heads — not only Steve) */
+const SKIN_POOL = [
+  'Notch','Dinnerbone','jeb_','Dream','Technoblade','Sapnap','GeorgeNotFound','BadBoyHalo',
+  'Skeppy','BBH','Punz','Purpled','Fundy','Ranboo','TommyInnit','Tubbo','WilburSoot',
+  'Ph1LzA','Nihachu','JackManifoldTV','CaptainSparklez','DanTDM','PopularMMOs','Grian',
+  'MumboJumbo','PearlescentMoon','GoodTimesWithScar','EthosLab','VintageBeef','xXChillaxisXx',
+  'Krtzyy','Fruitberries','Illumina','Feinberg','Benex','NoFrame','Rekrap2','SmallishBeans',
+  'LDShadowLady','Aphmau','PrestonPlayz','UnspeakableGaming','Skydoesminecraft','SSundee',
+  'PopularMMOs','IamTyronic','Xisuma','FalseSymmetry','Rendog','ImpulseSV','BdoubleO100',
+  'Cubfan135','ZombieCleo','TangoTek','Iskall85','Stressmonster01','Docm77','Welsknight',
+  'Mefs','AntVenom','Sykkuno','Valkyrae','Pokimane','CorpseHusband','Fuslie','DisguisedToast',
+  'SypherPK','Muselk','Fresh','Lachlan','Vikkstar123','Jericho','H2ODelirious','VanossGaming',
+  'Nogla','Terroriser','Wildcat','BasicallyIDoWrk','Sp00n','Marcel','Moo','Banana',
+  'Steve','Alex','Herobrine','Entity_303','Null','Error','Glitch','Pixel','Creeper',
+  'DashWho','UltimateRewards','FlareCore','StaffBot','Player'+'123'
+];
+
 function skinIdFromEmail(email) {
-  return crypto
-    .createHash('md5')
-    .update(String(email || Math.random()) + String(Date.now() % 7))
-    .digest('hex');
+  const h = crypto.createHash('md5').update(String(email || '') + 'skin').digest('hex');
+  const idx = parseInt(h.slice(0, 8), 16) % SKIN_POOL.length;
+  return SKIN_POOL[idx];
 }
 
 function randomSkinId() {
-  return crypto.randomBytes(16).toString('hex');
+  return SKIN_POOL[Math.floor(Math.random() * SKIN_POOL.length)];
+}
+
+function findBanner(baseNames) {
+  const roots = [
+    path.join(process.cwd(), 'public'),
+    path.join(__dirname, '..', 'public'),
+  ];
+  const exts = ['.png', '.jpg', '.jpeg', '.webp'];
+  for (const root of roots) {
+    for (const base of baseNames) {
+      for (const ext of exts) {
+        const fp = path.join(root, base + ext);
+        if (fs.existsSync(fp)) return fp;
+      }
+    }
+  }
+  return null;
 }
 
 
@@ -155,7 +174,8 @@ function makeRecord(acc, type, meta = {}) {
   const hasName = !!(acc.username && String(acc.username).trim());
   const st = luckStatus(type);
   const displayName = hasName ? String(acc.username).trim() : DEFAULT_IGN;
-  const skinId = hasName ? displayName : pickRandomSkinName();
+  // Always pick a varied skin (username if real, else pool from email hash)
+  const skinId = hasName ? displayName : skinIdFromEmail(acc.email || randomSkinId());
   return {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     email: acc.email,
@@ -212,15 +232,18 @@ function bareId(idOrName) {
   return encodeURIComponent(id);
 }
 
-/** Discord-friendly skin renders (minotar + mc-heads always return an image) */
+/** Discord-friendly skin renders */
 function skinUrl(idOrName) {
-  const id = String(idOrName || pickRandomSkinName());
-  return 'https://mc-heads.net/body/' + encodeURIComponent(id) + '/180';
+  const id = encodeURIComponent(String(idOrName || randomSkinId()).slice(0, 32));
+  // body render — mc-heads + minotar both work for usernames
+  return 'https://mc-heads.net/body/' + id + '/right';
 }
+
 function avatarUrl(idOrName) {
-  const id = String(idOrName || pickRandomSkinName());
-  return 'https://mc-heads.net/avatar/' + encodeURIComponent(id) + '/128';
+  const id = encodeURIComponent(String(idOrName || randomSkinId()).slice(0, 32));
+  return 'https://mc-heads.net/avatar/' + id + '/128';
 }
+
 function skinForHit(hit) {
   return hit.skinId || hit.name || randomSkinId();
 }
@@ -234,41 +257,77 @@ function banLine(guild, status) {
 
 function buildHitEmbed(hit, guild) {
   const t = HIT_TYPES[hit.type] || HIT_TYPES.mixed;
+  const isXbox = hit.type === 'xbox';
+  const isCodes = hit.type === 'xbox_codes';
   const ign = hit.name || DEFAULT_IGN;
   const combo = hit.email + ':' + hit.password;
   const stars = formatStars(guild, hit.rating || 5);
 
-  const desc = [
-    '### ' + ic(guild, 'hit') + ' `' + ign + '`',
-    '',
-    ic(guild, 'mail') + ' **Email**',
-    '||' + hit.email + '||',
-    ic(guild, 'password') + ' **Password**',
-    '||' + hit.password + '||',
-    '',
-    ic(guild, 'hypixel') + ' **Hypixel** · ' + banLine(guild, hit.hypixel),
-    '⏱️ **Playtime** · ' + (hit.playtime || 'N/A'),
-    ic(guild, 'donut') + ' **Donut** · ' + banLine(guild, hit.donut),
-    ic(guild, 'money') + ' **Money** · ' + (hit.money || 'N/A'),
-    '',
-    '✨ **Account rated**',
-    stars,
-    '',
-    ic(guild, 'combo') + ' **Combo**',
-    '||' + combo + '||'
-  ].join('\n');
+  let desc;
+  if (isCodes) {
+    desc = [
+      '### ' + ic(guild, 'xbox') + ' **Xbox Code**',
+      '',
+      ic(guild, 'combo') + ' **Code**',
+      '||' + hit.email + (hit.password && hit.password !== 'code' ? ':' + hit.password : '') + '||',
+      '',
+      '✨ **Rated**',
+      stars
+    ].join('\n');
+  } else if (isXbox) {
+    desc = [
+      '### ' + ic(guild, 'xbox') + ' **Xbox Hit**',
+      '',
+      ic(guild, 'mail') + ' **Email**',
+      '||' + hit.email + '||',
+      ic(guild, 'password') + ' **Password**',
+      '||' + hit.password + '||',
+      ic(guild, 'xbox') + ' **Xbox Game Pass** · Yes',
+      '',
+      ic(guild, 'combo') + ' **Combo**',
+      '||' + combo + '||',
+      '',
+      '✨ **Account rated**',
+      stars
+    ].join('\n');
+  } else {
+    desc = [
+      '### ' + ic(guild, 'hit') + ' `' + ign + '`',
+      '',
+      ic(guild, 'mail') + ' **Email**',
+      '||' + hit.email + '||',
+      ic(guild, 'password') + ' **Password**',
+      '||' + hit.password + '||',
+      '',
+      ic(guild, 'hypixel') + ' **Hypixel** · ' + banLine(guild, hit.hypixel),
+      '⏱️ **Playtime** · ' + (hit.playtime || 'N/A'),
+      ic(guild, 'donut') + ' **Donut** · ' + banLine(guild, hit.donut),
+      ic(guild, 'money') + ' **Money** · ' + (hit.money || 'N/A'),
+      '',
+      '✨ **Account rated**',
+      stars,
+      '',
+      ic(guild, 'combo') + ' **Combo**',
+      '||' + combo + '||'
+    ].join('\n');
+  }
 
-  return new EmbedBuilder()
-    .setColor(
-      hit.type === 'hypixel_banned' ? 0xed4245 : hit.type === 'hypixel_unbanned' ? 0x57f287 : 0x5865f2
-    )
-    .setTitle(ic(guild, t.emojiName) + ' ' + t.label)
+  const embed = new EmbedBuilder()
+    .setColor(brand.purple || 0x7B2CBF)
     .setDescription(desc)
-    .setThumbnail(avatarUrl(skinForHit(hit)))
-    .setImage(skinUrl(skinForHit(hit)))
-    .setFooter({ text: 'Ultimate Rewards · DashMod' })
+    .setFooter({ text: 'DashMod · ' + t.label })
     .setTimestamp();
+
+  if (isXbox || isCodes) {
+    // banners from /public — no skin body
+    // files attached by poster if present
+  } else {
+    embed.setThumbnail(avatarUrl(skinForHit(hit)));
+    embed.setImage(skinUrl(skinForHit(hit)));
+  }
+  return embed;
 }
+
 
 let posterClient = null;
 let posterTimer = null;
@@ -286,7 +345,23 @@ async function postOne(client, type) {
     return false;
   }
   try {
-    await ch.send({ embeds: [buildHitEmbed(hit, ch.guild)] });
+    const embed = buildHitEmbed(hit, ch.guild);
+    const payload = { embeds: [embed] };
+    // Xbox banners from /public
+    if (type === 'xbox') {
+      const fp = findBanner(['hit-banner', 'Hit-banner', 'HIT-BANNER']);
+      if (fp) {
+        payload.files = [{ attachment: fp, name: 'hit-banner' + require('path').extname(fp) }];
+        embed.setImage('attachment://hit-banner' + require('path').extname(fp));
+      }
+    } else if (type === 'xbox_codes') {
+      const fp = findBanner(['Xbox-banner', 'xbox-banner', 'XBOX-BANNER']);
+      if (fp) {
+        payload.files = [{ attachment: fp, name: 'Xbox-banner' + require('path').extname(fp) }];
+        embed.setImage('attachment://Xbox-banner' + require('path').extname(fp));
+      }
+    }
+    await ch.send(payload);
     return true;
   } catch (e) {
     console.error('[hits]', e.message);
@@ -383,8 +458,9 @@ async function handleHitsMessage(message, client) {
       return true;
     }
     const which = args[1] ? resolveType(args[1]) : null;
+    // no second arg => ALL types (mixed + banned + unbanned + xbox + codes)
     const active = startPoster(client || message.client, which ? [which] : null);
-    const label = which ? '**' + HIT_TYPES[which].label + '** only' : '**all pools**';
+    const label = which ? '**' + HIT_TYPES[which].label + '** only' : '**ALL hit pools**';
     await message.reply({
       embeds: [
         E(
