@@ -1,12 +1,10 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const dataStore = require('../utils/data');
 const brand = require('../config/brand');
-const { E } = require('../utils/embeds');
 const { em } = require('./stocks');
-const { isSbanActive } = require('./sban');
 
 function giveawayEmbed(g, ended = false, guild = null) {
-  const mins = Math.ceil(Math.max(0, g.ends - Date.now()) / 60000);
+  const mins = Math.ceil(Math.max(0, (g.ends || 0) - Date.now()) / 60000);
   const gift = em(guild, 'giveaway', '🎉');
   const tick = em(guild, 'tick', '✅');
   const star = em(guild, 'starss', '✨');
@@ -19,7 +17,7 @@ function giveawayEmbed(g, ended = false, guild = null) {
         `**Winners:** ${g.winners}`,
         ended
           ? `**Winner(s):** ${g.winnerTags || 'None'}`
-          : `**Ends:** <t:${Math.floor(g.ends / 1000)}:R> (~${mins}m)`,
+          : `**Ends:** <t:${Math.floor((g.ends || Date.now()) / 1000)}:R> (~${mins}m)`,
         '',
         ended ? '' : `${em(guild, 'emoji_1', '🎈')} Click **Enter** to join!`,
       ]
@@ -28,7 +26,7 @@ function giveawayEmbed(g, ended = false, guild = null) {
     )
     .setImage(g.image || null)
     .setFooter({ text: brand.footer || 'DashMod · Giveaway' })
-    .setTimestamp(ended ? new Date(g.ends) : new Date());
+    .setTimestamp(ended ? new Date(g.ends || Date.now()) : new Date());
 }
 
 function giveawayRow(disabled = false) {
@@ -46,15 +44,27 @@ function giveawayRow(disabled = false) {
   );
 }
 
-async function endGiveaway(client, g) {
-  const data = dataStore.get();
-  if (!data.giveaways) data.giveaways = [];
-  g.ended = true;
-  const ch = await client.channels.fetch(g.channelId).catch(() => null);
-  if (!ch) {
-    dataStore.save();
-    return;
+/** Normalize: giveaways may be {} keyed by messageId OR [] */
+function listGiveaways(data) {
+  if (!data.giveaways) {
+    data.giveaways = {};
+    return [];
   }
+  if (Array.isArray(data.giveaways)) {
+    return data.giveaways.map((g, i) => ({ key: g.messageId || String(i), g }));
+  }
+  return Object.entries(data.giveaways).map(([key, g]) => ({ key, g }));
+}
+
+async function endGiveaway(client, g, key) {
+  const data = dataStore.get();
+  if (!data.giveaways) data.giveaways = {};
+  g.ended = true;
+
+  const chId = g.channelId;
+  const msgId = g.messageId || key;
+  const ch = chId ? await client.channels.fetch(chId).catch(() => null) : null;
+
   const entries = (g.entries || []).filter(Boolean);
   const winners = [];
   const pool = [...entries];
@@ -64,17 +74,29 @@ async function endGiveaway(client, g) {
   }
   g.winnerIds = winners;
   g.winnerTags = winners.length ? winners.map((id) => `<@${id}>`).join(', ') : 'None';
+
+  if (Array.isArray(data.giveaways)) {
+    // keep array form if somehow array
+  } else if (key != null) {
+    data.giveaways[key] = g;
+  } else if (msgId) {
+    data.giveaways[msgId] = g;
+  }
   dataStore.save();
+
+  if (!ch) return;
 
   const gift = em(ch.guild, 'giveaway', '🎉');
   const tick = em(ch.guild, 'tick', '✅');
   try {
-    const msg = await ch.messages.fetch(g.messageId).catch(() => null);
-    if (msg) {
-      await msg.edit({
-        embeds: [giveawayEmbed(g, true, ch.guild)],
-        components: [giveawayRow(true)],
-      });
+    if (msgId) {
+      const msg = await ch.messages.fetch(msgId).catch(() => null);
+      if (msg) {
+        await msg.edit({
+          embeds: [giveawayEmbed(g, true, ch.guild)],
+          components: [giveawayRow(true)],
+        });
+      }
     }
   } catch (_) {}
 
@@ -90,18 +112,22 @@ async function endGiveaway(client, g) {
 
 function startGiveawayChecker(client) {
   setInterval(async () => {
-    const data = dataStore.get();
-    if (!data.giveaways) return;
-    const now = Date.now();
-    for (const g of data.giveaways) {
-      if (g.ended) continue;
-      if (g.ends <= now) {
+    try {
+      const data = dataStore.get();
+      if (!data.giveaways) return;
+      const now = Date.now();
+      const list = listGiveaways(data);
+      for (const { key, g } of list) {
+        if (!g || g.ended) continue;
+        if (!g.ends || g.ends > now) continue;
         try {
-          await endGiveaway(client, g);
+          await endGiveaway(client, g, key);
         } catch (e) {
           console.error('gw end', e.message);
         }
       }
+    } catch (e) {
+      console.error('gw checker', e.message);
     }
   }, 15000);
 }
@@ -111,4 +137,5 @@ module.exports = {
   giveawayRow,
   endGiveaway,
   startGiveawayChecker,
+  listGiveaways,
 };
