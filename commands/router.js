@@ -3,6 +3,8 @@ const brand = require('../config/brand');
 const env = require('../config/env');
 const { ROLE } = require('../config/roles');
 const { E } = require('../utils/embeds');
+const spinSys = require('../systems/spin');
+const promoteSys = require('../systems/promote');
 const { isStaff } = require('../utils/staff');
 const { stylish } = require('../utils/fonts');
 const { parseDuration } = require('../utils/duration');
@@ -103,48 +105,7 @@ async function handleCommand(message, client) {
   }
 
   // ── HELP ──
-    
-  if (cmd === 'auth') {
-    const authUsers = require('../systems/authUsers');
-    if (!authUsers.isPermanent(message.author.id)) {
-      await message.reply({ embeds: [E('Auth', 'Permanent admins only.', brand.red)] });
-      return true;
-    }
-    const user = message.mentions.users.first();
-    if (!user) {
-      await message.reply({ embeds: [E('Auth', '`-auth @user [1h|7d]` — omit time = unlimited', brand.gold)] });
-      return true;
-    }
-    const time = args.filter((a) => !a.startsWith('<@')).join(' ').trim() || null;
-    // args may be [@user, 1h] after shift
-    const timeArg = args.find((a) => /^\d/.test(a) || /[smhdw]$/i.test(a)) || null;
-    const r = authUsers.authorize(user.id, timeArg, message.author.id);
-    if (!r.ok) {
-      await message.reply({ embeds: [E('Auth', r.error || 'Failed', brand.red)] });
-      return true;
-    }
-    const when = r.unlimited ? '**unlimited**' : `<t:${Math.floor(r.expiresAt / 1000)}:R>`;
-    await message.reply({ embeds: [E('Auth', `Authorized ${user} · ${when}`, brand.green)] });
-    return true;
-  }
-  if (cmd === 'deauth') {
-    const authUsers = require('../systems/authUsers');
-    if (!authUsers.isPermanent(message.author.id)) {
-      await message.reply({ embeds: [E('Auth', 'Permanent admins only.', brand.red)] });
-      return true;
-    }
-    const user = message.mentions.users.first();
-    if (!user) {
-      await message.reply('`-deauth @user`');
-      return true;
-    }
-    const r = authUsers.revoke(user.id);
-    await message.reply({ embeds: [E('Auth', r.ok ? `Removed ${user}` : r.error, r.ok ? brand.green : brand.red)] });
-    return true;
-  }
-
-
-  if (cmd === 'help' || cmd === 'commands') {
+    if (cmd === 'help' || cmd === 'commands') {
     await message.reply({
       embeds: [
         E(brand.BOT_NAME + ' · Commands', [
@@ -535,6 +496,35 @@ async function handleCommand(message, client) {
     await message.reply({ embeds: [E(user.username).setImage(banner)] });
     return true;
   }
+  
+  if (cmd === 'spin') {
+    await spinSys.handlePrefix(message, args);
+    return true;
+  }
+  if (cmd === 'promote') {
+    const mem = message.mentions.members.first();
+    if (!mem) return message.reply({ embeds: [E('Promote', 'Usage: `-promote @user`', brand.red)] });
+    await promoteSys.promote(message, mem, false);
+    return true;
+  }
+  if (cmd === 'demote') {
+    const mem = message.mentions.members.first();
+    if (!mem) return message.reply({ embeds: [E('Demote', 'Usage: `-demote @user`', brand.red)] });
+    await promoteSys.promote(message, mem, true);
+    return true;
+  }
+  if (cmd === 'embed') {
+    const text = args.join(' ').trim() || message.content.split(/embed/i).slice(1).join('embed').trim();
+    if (!text) return message.reply({ embeds: [E('Embed', 'Usage: `-embed your text`', brand.red)] });
+    await message.delete().catch(() => null);
+    await message.channel.send({ embeds: [E('Message', text, brand.purple)] });
+    return true;
+  }
+  if (cmd === 'padd') {
+    return message.reply({ embeds: [E('Removed', 'Use `/premium add` only. `-padd` is disabled.', brand.red)] });
+  }
+
+
   if (cmd === 'ping') {
     const sent = await message.reply({ embeds: [E('Ping', '…')] });
     await sent.edit({
