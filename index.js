@@ -260,7 +260,7 @@ async function onReady() {
   setInterval(() => {
     const data = dataStore.get();
     for (const [id, g] of Object.entries(data.giveaways || {})) {
-      if (!g.ended && g.ends <= Date.now()) endGiveaway(client, id).catch(() => {});
+      if (g && !g.ended && g.ends && g.ends <= Date.now()) endGiveaway(client, g, id).catch((e) => console.error('gw', e.message));
     }
   }, 15000);
 
@@ -341,8 +341,10 @@ client.on('messageCreate', async (message) => {
   // Replace Falcon (and similar) invite embeds with DashMod style
   if (message.author?.bot) {
     try {
-      if (await tryReplaceFalconInvite(message, client)) return;
+      // fire-and-forget so it never blocks other bot traffic
+      tryReplaceFalconInvite(message, client).catch(() => {});
     } catch (_) {}
+    return; // ignore all bot messages for the rest of the pipeline
   }
 
   // Anti-commands channel: members cannot use bot-style commands
@@ -495,12 +497,32 @@ client.on('messageCreate', async (message) => {
   });
   if (hitHandled) return;
 
-  await handleCommand(message, client);
+  try {
+    await handleCommand(message, client);
+  } catch (e) {
+    console.error('cmd', e.message);
+    try { await message.reply({ content: 'Command error: ' + e.message }).catch(() => {}); } catch (_) {}
+  }
 });
 
+
 client.on('interactionCreate', async (interaction) => {
+  // Always try to answer Discord within 3s
+  const safeReply = async (payload) => {
+    try {
+      const data = typeof payload === 'string' ? { content: payload, ephemeral: true } : payload;
+      if (interaction.deferred || interaction.replied) {
+        return await interaction.followUp(data).catch(() => interaction.editReply(data).catch(() => null));
+      }
+      return await interaction.reply(data);
+    } catch (e) {
+      console.error('safeReply', e.message);
+      return null;
+    }
+  };
+
   try {
-    // Backup buttons + /backup slash
+    // Buttons: backup
     if (
       (interaction.isButton() && String(interaction.customId || '').startsWith('backup_')) ||
       (interaction.isChatInputCommand() && interaction.commandName === 'backup')
@@ -511,140 +533,157 @@ client.on('interactionCreate', async (interaction) => {
       });
       if (handled) return;
     }
-    if (interaction.isButton() && interaction.customId.startsWith('ttt:')) {
+
+    if (interaction.isButton() && String(interaction.customId || '').startsWith('ttt:')) {
       await ttt.handleButton(interaction);
       return;
     }
+
     if (interaction.isButton() && interaction.customId === 'gw_enter') {
       const data = dataStore.get();
       const g = data.giveaways?.[interaction.message.id];
-      if (!g || g.ended) return interaction.reply({ content: 'Ended.', ephemeral: true });
-      if (isSbanActive(interaction.user.id)) return interaction.reply({ content: 'You are giveaway-banned (sban).', ephemeral: true });
+      if (!g || g.ended) return safeReply('Ended.');
+      if (isSbanActive(interaction.user.id)) return safeReply('You are giveaway-banned (sban).');
       if (!g.entries) g.entries = [];
-      if (g.entries.includes(interaction.user.id)) return interaction.reply({ content: 'Already in.', ephemeral: true });
+      if (g.entries.includes(interaction.user.id)) return safeReply('Already in.');
       g.entries.push(interaction.user.id);
       dataStore.save();
-      await interaction.message.edit({ embeds: [giveawayEmbed(g)], components: [giveawayRow()] }).catch(() => {});
-      return interaction.reply({ content: 'Entered!', ephemeral: true });
+      await interaction.message.edit({ embeds: [giveawayEmbed(g, false, interaction.guild)], components: [giveawayRow()] }).catch(() => {});
+      return safeReply('Entered!');
     }
-    if (!interaction.isChatInputCommand()) return;
-    const name = interaction.commandName;
-    const reply = (x) => interaction.reply(typeof x === 'string' ? { content: x, ephemeral: true } : x);
-    const data = dataStore.get();
+    if (interaction.isButton() && interaction.customId === 'gw_count') {
+      const data = dataStore.get();
+      const g = data.giveaways?.[interaction.message.id];
+      const n = (g && g.entries && g.entries.length) || 0;
+      return safeReply(`Entries: **${n}**`);
+    }
+    if (interaction.isButton() && (interaction.customId === 'spin_go' || interaction.customId === 'spin_close')) {
+      // handled by collector in spin.js
+      return;
+    }
 
-    
-    if (name === 'payouts') {
-      const list = Object.values(eventsSys.ensure());
-      let total = 0;
-      const staffs = new Set();
-      for (const e of list) {
-        for (const [sid, n] of Object.entries(e.payoutStaff || {})) {
-          total += n;
-          staffs.add(sid);
-        }
-      }
-      return reply({ embeds: [E('Payouts', `Recorded **${total}** legits by **${staffs.size}** staff.`, brand.color)] });
+    if (!interaction.isChatInputCommand()) return;
+
+    const name = interaction.commandName;
+    const data = dataStore.get();
+    const reply = (x) => safeReply(x);
+
+    // ---- fast commands first ----
+    if (name === 'ping') {
+      return reply({ embeds: [E('Ping', `WS **${Math.round(client.ws.ping)}ms**`)], ephemeral: true });
     }
-    if (name === 'level') {
+    if (name === 'help') {
+      return reply({
+        embeds: [E(brand.BOT_NAME, `Prefix \`${brand.PREFIX}\` · \`${brand.PREFIX}help\`\nSlash: /invites /messages /giveaway /promote /demote /spin /premium /hit`)],
+        ephemeral: true,
+      });
+    }
+    if (name === 'invites') {
       const u = interaction.options.getUser('user') || interaction.user;
-      const member = await interaction.guild.members.fetch(u.id).catch(() => null) || interaction.member;
-      const xp = (data.levels?.[interaction.guildId]?.[u.id]) || 0;
-      await interaction.deferReply({ ephemeral: true });
-      await levels.sendLevelCard(interaction.channel, member, xp);
-      return interaction.editReply({ content: 'Level card sent.' }).catch(() => {});
+      return reply({ embeds: [buildInviteEmbed(u, interaction.guildId, interaction.user.username, interaction.guild)] });
+    }
+    if (name === 'messages') {
+      const u = interaction.options.getUser('user') || interaction.user;
+      const n = (data.messages?.[interaction.guildId]?.[u.id] || 0);
+      return reply({ embeds: [buildMessagesEmbed ? buildMessagesEmbed(u, n, interaction.user.username, interaction.guild) : E('Messages', `**${u.username}** · **${n}**`)] });
+    }
+    if (name === 'protection') {
+      const p = data.protection || {};
+      return reply({
+        embeds: [E('Protection', `Automod **${p.automod !== false ? 'ON' : 'OFF'}** · Anti-raid **${p.antiraid !== false ? 'ON' : 'OFF'}**`)],
+        ephemeral: true,
+      });
+    }
+    if (name === 'serverinfo') {
+      const g = interaction.guild;
+      return reply({
+        embeds: [E('Server', `**${g.name}**\nMembers: **${g.memberCount}**`).setThumbnail(g.iconURL({ size: 256 }))],
+      });
+    }
+    if (name === 'userinfo') {
+      const u = interaction.options.getUser('user') || interaction.user;
+      return reply({
+        embeds: [E('User', `**${u.tag || u.username}**\nID: \`${u.id}\``).setThumbnail(u.displayAvatarURL({ size: 256 }))],
+      });
+    }
+    if (name === 'avatar') {
+      const u = interaction.options.getUser('user') || interaction.user;
+      return reply({ embeds: [E(u.username).setImage(u.displayAvatarURL({ size: 512 }))] });
     }
     if (name === 'stock') {
-      const free = stockVault.counts('free');
-      const prem = stockVault.counts('premium');
-      const fl = Object.entries(free).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
-      const pl = Object.entries(prem).map(([s, n]) => `• **${s}** → \`${n}\``).join('\n') || '_empty_';
-      return reply({ embeds: [E('📦 Stock', `**FREE**\n${fl}\n\n**PREMIUM**\n${pl}`, brand.color)] });
+      try {
+        const { formatStockList } = require('./systems/stocks');
+        const body = typeof formatStockList === 'function' ? formatStockList(data, interaction.guild) : 'Use `-stock`';
+        return reply({ embeds: [E('Stock', body, brand.color)] });
+      } catch (e) {
+        return reply({ content: 'Stock error: ' + e.message, ephemeral: true });
+      }
     }
-    if (name === 'event') {
-      const sub = interaction.options.getSubcommand();
-      if (sub === 'list') {
-        const list = eventsSys.listActive(interaction.guildId);
-        return reply({ embeds: [E('Events', list.length ? list.map((e) => `• **${e.name}**`).join('\n') : 'None', brand.color)] });
-      }
-      if (sub === 'add') {
-        const { isStaff } = require('./utils/staff');
-        if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
-        const ename = interaction.options.getString('name', true);
-        const timeRaw = interaction.options.getString('time');
-        let endsAt = null;
-        if (timeRaw) {
-          const ms = parseDuration(timeRaw);
-          if (ms) endsAt = Date.now() + ms;
+    if (name === 'payouts') {
+      try {
+        const list = Object.values(eventsSys.ensure());
+        let total = 0;
+        const staffs = new Set();
+        for (const e of list) {
+          for (const [sid, n] of Object.entries(e.payoutStaff || {})) {
+            total += n;
+            staffs.add(sid);
+          }
         }
-        eventsSys.setPending(interaction.user.id, { name: ename, endsAt });
-        return reply({ content: 'Send the **event body** as your next message (e.g. `2 invites = mcfa`).', ephemeral: true });
+        return reply({ embeds: [E('Payouts', `Recorded **${total}** legits by **${staffs.size}** staff.`, brand.color)] });
+      } catch (e) {
+        return reply({ content: 'Payouts error: ' + e.message, ephemeral: true });
       }
+    }
+    if (name === 'level') {
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
+      try {
+        const u = interaction.options.getUser('user') || interaction.user;
+        const xp = (data.levels?.[interaction.guildId]?.[u.id]) || 0;
+        if (levels.sendLevelCard) {
+          await levels.sendLevelCard(interaction.channel, u, xp, interaction);
+        } else {
+          await interaction.editReply({ embeds: [E('Level', `**${u.username}** · XP **${xp}**`)] });
+        }
+      } catch (e) {
+        await interaction.editReply({ content: 'Level error: ' + e.message }).catch(() => {});
+      }
+      return;
     }
     if (name === 'hit') {
-      const { isStaff } = require('./utils/staff');
-      const sub = interaction.options.getSubcommand();
-      const { stockEmbed, startPoster, stopPoster } = require('./systems/hits');
-      if (sub === 'stock') return reply({ embeds: [stockEmbed()] });
-      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.' });
-      if (sub === 'start') {
-        startPoster(client);
-        return reply({ content: 'Hits poster started.' });
+      let sub = 'stock';
+      try { sub = interaction.options.getSubcommand(); } catch (_) {}
+      if (sub === 'stock') {
+        try {
+          const { stockEmbed } = require('./systems/hits');
+          return reply({ embeds: [stockEmbed(interaction.guild)] });
+        } catch (_) {
+          return reply({ content: 'Use `-hit stock`', ephemeral: true });
+        }
       }
-      if (sub === 'stop') {
-        stopPoster();
-        return reply({ content: 'Hits poster stopped.' });
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+      try {
+        const hits = require('./systems/hits');
+        if (sub === 'start') {
+          hits.startPoster(client, null);
+          return reply({ content: 'Hits poster started (all pools).', ephemeral: true });
+        }
+        if (sub === 'stop') {
+          hits.stopPoster();
+          return reply({ content: 'Hits poster stopped.', ephemeral: true });
+        }
+      } catch (e) {
+        return reply({ content: 'Hits error: ' + e.message, ephemeral: true });
       }
+      return reply({ content: 'Unknown hit subcommand.', ephemeral: true });
     }
-    if (name === 'free' || name === 'premium') {
-      // staff only deliver via telling them to use prefix for now
-      return reply({ content: `Use \`-${name} ${interaction.options.getString('service')}\` in the ticket (staff).`, ephemeral: true });
-    }
-
-    if (name === 'help') return reply({ embeds: [E(brand.BOT_NAME, `Prefix \`${brand.PREFIX}\` · \`${brand.PREFIX}help\``)], ephemeral: true });
-    
-    if (name === 'promote' || name === 'demote') {
-      const user = interaction.options.getUser('user');
-      const mem = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!mem) return reply({ content: 'Member not found.', ephemeral: true });
-      // fake message-like for promoteSys
-      const fakeMsg = {
-        author: interaction.user,
-        member: interaction.member,
-        guild: interaction.guild,
-        channel: interaction.channel,
-        reply: (x) => reply(x),
-      };
-      await promoteSys.promote(fakeMsg, mem, name === 'demote');
-      return;
-    }
-    if (name === 'spin') {
-      const raw = interaction.options.getString('players') || '';
-      const args = raw.split(/\s+/).filter(Boolean);
-      const fakeMsg = {
-        author: interaction.user,
-        member: interaction.member,
-        guild: interaction.guild,
-        channel: interaction.channel,
-        mentions: { members: { values: () => [] }, roles: { values: () => [] } },
-        reply: (x) => interaction.followUp(x).catch(() => interaction.reply(x)),
-      };
-      await interaction.deferReply();
-      // collect mentions from resolved if any — names only from string
-      await spinSys.runSpin(
-        {
-          ...fakeMsg,
-          reply: async (x) => interaction.editReply(x),
-          channel: interaction.channel,
-          guild: interaction.guild,
-          author: interaction.user,
-          mentions: { members: { values: () => [] }, roles: { values: () => [] } },
-        },
-        args
-      );
-      return;
+    if (name === 'free') {
+      const service = interaction.options.getString('service') || '';
+      return reply({ content: `Use \`-free ${service}\` in the ticket (staff).`, ephemeral: true });
     }
     if (name === 'premium') {
-      const sub = interaction.options.getSubcommand();
+      let sub = 'take';
+      try { sub = interaction.options.getSubcommand(); } catch (_) {}
       const staffRole = process.env.STAFF_TEAM_ROLE_ID || '1548173330794815599';
       const authRoles = new Set([
         staffRole,
@@ -655,46 +694,85 @@ client.on('interactionCreate', async (interaction) => {
         '1547183159794204675',
       ]);
       const isAuth =
-        interaction.member.permissions.has('Administrator') ||
-        interaction.member.roles.cache.some((r) => authRoles.has(r.id)) ||
+        interaction.member?.permissions?.has?.('Administrator') ||
+        interaction.member?.roles?.cache?.some?.((r) => authRoles.has(r.id)) ||
         ['1541659394188509215', '1080190046138802306'].includes(interaction.user.id);
       if (!isAuth) return reply({ content: 'Staff only.', ephemeral: true });
       if (sub === 'add') {
         const combo = interaction.options.getString('combo');
+        if (!combo) return reply({ content: 'Need combo `email:pass`', ephemeral: true });
         const service = (interaction.options.getString('service') || 'mcfa').toLowerCase();
-        const stockVault = require('./systems/stockVault');
-        if (stockVault.addPremium) {
-          const n = stockVault.addPremium(service, combo);
-          return reply({ content: `Added to premium **${service}** (${n}).`, ephemeral: true });
-        }
-        // fallback data store
-        const dataStore = require('./utils/data');
-        const d = dataStore.get();
-        if (!d.premiumVault) d.premiumVault = {};
-        if (!d.premiumVault[service]) d.premiumVault[service] = [];
-        d.premiumVault[service].push(combo);
+        try {
+          const stockVault = require('./systems/stockVault');
+          if (typeof stockVault.addPremium === 'function') {
+            const n = stockVault.addPremium(service, combo);
+            return reply({ content: `Added to premium **${service}** (${n}).`, ephemeral: true });
+          }
+        } catch (_) {}
+        if (!data.premiumVault) data.premiumVault = {};
+        if (!Array.isArray(data.premiumVault[service])) data.premiumVault[service] = [];
+        data.premiumVault[service].push(combo);
         dataStore.save();
         return reply({ content: `Added to premium **${service}**.`, ephemeral: true });
       }
-      if (sub === 'take') {
-        // fall through to existing free/premium take if any
+      const service = interaction.options.getString('service') || '';
+      return reply({ content: `Use \`-premium ${service}\` in the ticket (staff).`, ephemeral: true });
+    }
+    if (name === 'promote' || name === 'demote') {
+      await interaction.deferReply().catch(() => {});
+      try {
+        const user = interaction.options.getUser('user');
+        const mem = await interaction.guild.members.fetch(user.id).catch(() => null);
+        if (!mem) return interaction.editReply({ content: 'Member not found.' });
+        const fakeMsg = {
+          author: interaction.user,
+          member: interaction.member,
+          guild: interaction.guild,
+          channel: interaction.channel,
+          reply: async (x) => {
+            try {
+              await interaction.editReply(x);
+            } catch (_) {
+              await interaction.channel.send(x).catch(() => {});
+            }
+          },
+        };
+        await promoteSys.promote(fakeMsg, mem, name === 'demote');
+        try {
+          await interaction.editReply({ content: name === 'demote' ? 'Demotion processed.' : 'Promotion processed.' });
+        } catch (_) {}
+      } catch (e) {
+        await interaction.editReply({ content: 'Error: ' + (e.message || e) }).catch(() => {});
       }
+      return;
     }
-
-    if (name === 'invites') {
-      const u = interaction.options.getUser('user') || interaction.user;
-      return reply({ embeds: [buildInviteEmbed(u, interaction.guildId, interaction.user.username)] });
-    }
-    if (name === 'messages') {
-      const u = interaction.options.getUser('user') || interaction.user;
-      return reply({
-        embeds: [E('Messages', `**${u.username}** · **${(data.messages?.[interaction.guildId]?.[u.id] || 0).toLocaleString()}**`)]
-      });
+    if (name === 'spin') {
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
+      try {
+        const raw = interaction.options.getString('players') || '';
+        const args = raw.split(/\s+/).filter(Boolean);
+        await spinSys.runSpin(
+          {
+            author: interaction.user,
+            member: interaction.member,
+            guild: interaction.guild,
+            channel: interaction.channel,
+            mentions: { members: { values: () => [] }, roles: { values: () => [] } },
+            reply: async (x) => interaction.editReply(x).catch(() => interaction.channel.send(x)),
+          },
+          args
+        );
+        await interaction.editReply({ content: 'Spin posted in channel.' }).catch(() => {});
+      } catch (e) {
+        await interaction.editReply({ content: 'Spin error: ' + (e.message || e) }).catch(() => {});
+      }
+      return;
     }
     if (name === 'giveaway') {
-      if (!isStaff(interaction.member)) return reply('Staff only.');
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
       const ms = parseDuration(interaction.options.getString('time'));
-      if (!ms) return reply('Bad time');
+      if (!ms) return interaction.editReply({ content: 'Bad time (e.g. 1h, 30m)' });
       const g = {
         channelId: interaction.channelId,
         prize: interaction.options.getString('prize'),
@@ -702,98 +780,103 @@ client.on('interactionCreate', async (interaction) => {
         ends: Date.now() + ms,
         hostId: interaction.user.id,
         entries: [],
-        ended: false
+        ended: false,
       };
-      const msg = await interaction.channel.send({ embeds: [giveawayEmbed(g)], components: [giveawayRow()] });
+      const msg = await interaction.channel.send({
+        embeds: [giveawayEmbed(g, false, interaction.guild)],
+        components: [giveawayRow()],
+      });
+      g.messageId = msg.id;
       if (!data.giveaways) data.giveaways = {};
       data.giveaways[msg.id] = g;
       dataStore.save();
-      setTimeout(() => endGiveaway(client, msg.id), ms + 500);
-      return reply({ content: 'Started.', ephemeral: true });
+      setTimeout(() => endGiveaway(client, g, msg.id).catch(() => {}), ms + 500);
+      return interaction.editReply({ content: 'Giveaway started.' });
     }
     if (name === 'export') {
-      if (!isStaff(interaction.member)) return reply('Staff only.');
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
       const ch = interaction.options.getChannel('channel');
       data.syncChannelId = ch.id;
       dataStore.save();
       const { exportToChannel } = require('./systems/sync');
       await exportToChannel(ch, 'slash');
-      return reply(`Exported to ${ch}`);
-    }
-    if (name === 'protection') {
-      const p = data.protection || {};
-      return reply({
-        embeds: [E('Protection', `Automod **${p.automod !== false ? 'ON' : 'OFF'}** · Anti-raid **${p.antiraid !== false ? 'ON' : 'OFF'}**`)],
-        ephemeral: true
-      });
-    }
-    if (name === 'serverinfo') {
-      const g = interaction.guild;
-      return reply({
-        embeds: [E('Server').setThumbnail(g.iconURL({ size: 256 })).addFields({ name: 'Members', value: String(g.memberCount), inline: true })]
-      });
-    }
-    if (name === 'userinfo') {
-      const u = interaction.options.getUser('user') || interaction.user;
-      return reply({ embeds: [E(u.username).setThumbnail(u.displayAvatarURL({ size: 256 })).addFields({ name: 'ID', value: u.id })] });
+      return interaction.editReply({ content: `Exported to ${ch}` });
     }
     if (name === 'purge') {
-      if (!isStaff(interaction.member)) return reply('Staff only.');
-      await interaction.deferReply({ ephemeral: true });
-      const deleted = await interaction.channel.bulkDelete(interaction.options.getInteger('amount'), true).catch(() => null);
-      return interaction.editReply(`Deleted **${deleted?.size || 0}**`);
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
+      const amount = interaction.options.getInteger('amount') || 10;
+      const deleted = await interaction.channel.bulkDelete(Math.min(amount, 100), true).catch(() => null);
+      return interaction.editReply({ content: `Deleted **${deleted?.size || 0}** messages.` });
     }
     if (name === 'ban' || name === 'kick' || name === 'timeout') {
-      if (!isStaff(interaction.member)) return reply('Staff only.');
+      if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
       const user = interaction.options.getUser('user');
       const reason = interaction.options.getString('reason') || 'No reason';
-      if (name === 'ban') {
-        await interaction.guild.members.ban(user.id, { reason }).catch(() => {});
-        return reply({ embeds: [E('Banned', user.tag, brand.green)], ephemeral: true });
-      }
       const mem = await interaction.guild.members.fetch(user.id).catch(() => null);
-      if (!mem) return reply('Not found');
-      if (name === 'kick') {
-        await mem.kick(reason).catch(() => {});
-        return reply({ embeds: [E('Kicked', user.tag, brand.green)], ephemeral: true });
+      if (name === 'ban') {
+        await interaction.guild.members.ban(user.id, { reason }).catch((e) => reply({ content: e.message, ephemeral: true }));
+        return reply({ content: `Banned **${user.tag}**`, ephemeral: true });
       }
-      const ms = parseDuration(interaction.options.getString('duration') || '1h') || 3600000;
-      await mem.timeout(ms, reason).catch(() => {});
-      return reply({ embeds: [E('Timeout', user.tag, brand.green)], ephemeral: true });
+      if (name === 'kick') {
+        if (!mem) return reply({ content: 'Member not found.', ephemeral: true });
+        await mem.kick(reason).catch((e) => reply({ content: e.message, ephemeral: true }));
+        return reply({ content: `Kicked **${user.tag}**`, ephemeral: true });
+      }
+      if (name === 'timeout') {
+        if (!mem) return reply({ content: 'Member not found.', ephemeral: true });
+        const dur = interaction.options.getString('duration') || '1h';
+        const ms = parseDuration(dur) || 3600000;
+        await mem.timeout(ms, reason).catch((e) => reply({ content: e.message, ephemeral: true }));
+        return reply({ content: `Timed out **${user.tag}** (${dur})`, ephemeral: true });
+      }
     }
-    if (name === 'ping') return reply({ embeds: [E('Ping', `WS **${Math.round(client.ws.ping)}ms**`)], ephemeral: true });
     if (name === 'game') {
-      const opp = interaction.options.getUser('user');
-      if (!opp || opp.bot || opp.id === interaction.user.id) return reply('Pick a real opponent.');
-      await interaction.deferReply();
-      await ttt.startGame(interaction.channel, interaction.user, opp);
-      return interaction.editReply('Challenge sent!');
-    }
-
-    if (name === 'stock') {
-      const { listPool } = require('./systems/genStock');
-      const free = listPool(interaction.guild, 'fgen');
-      const boost = listPool(interaction.guild, 'bgen');
-      const prem = listPool(interaction.guild, 'pgen');
-      return reply({
-        embeds: [
-          E('Stock', `**Freemium**\n${free}\n\n**Booster**\n${boost}\n\n**Premium**\n${prem}`)
-        ]
-      });
+      const user = interaction.options.getUser('user');
+      if (ttt && ttt.start) {
+        await ttt.start(interaction, user);
+        return;
+      }
+      return reply({ content: 'TicTacToe unavailable.', ephemeral: true });
     }
     if (name === 'access') {
-      const { accessGuideEmbed } = require('./systems/statusRole');
-      return reply({ embeds: [accessGuideEmbed(interaction.guild)] });
+      try {
+        const { accessGuideEmbed } = require('./systems/statusRole');
+        return reply({ embeds: [accessGuideEmbed(interaction.guild)] });
+      } catch (_) {
+        return reply({ content: 'Use `-access`', ephemeral: true });
+      }
+    }
+    if (name === 'event') {
+      let sub = 'list';
+      try { sub = interaction.options.getSubcommand(); } catch (_) {}
+      if (sub === 'list') {
+        const list = Object.values(eventsSys.ensure());
+        return reply({ embeds: [E('Events', list.length ? list.map((e) => `• **${e.name}**`).join('\n') : 'None', brand.color)] });
+      }
+      if (sub === 'add') {
+        if (!isStaff(interaction.member)) return reply({ content: 'Staff only.', ephemeral: true });
+        const ename = interaction.options.getString('name');
+        const time = interaction.options.getString('time');
+        const endsAt = time ? Date.now() + (parseDuration(time) || 0) : null;
+        eventsSys.setPending(interaction.user.id, { name: ename, endsAt });
+        return reply({ content: 'Send the **event body** as your next message.', ephemeral: true });
+      }
     }
 
-    if (name === 'avatar') {
-      const u = interaction.options.getUser('user') || interaction.user;
-      return reply({ embeds: [E(u.username).setImage(u.displayAvatarURL({ size: 512 }))] });
-    }
+    // fallback — never leave Discord hanging
+    return reply({ content: `Command \`/${name}\` received. Try prefix \`${brand.PREFIX}${name}\` if this is incomplete.`, ephemeral: true });
   } catch (e) {
-    console.error('ix', e.message);
+    console.error('ix', e.message, e.stack);
+    try {
+      const payload = { content: 'Error: ' + (e.message || 'unknown'), ephemeral: true };
+      if (interaction.deferred || interaction.replied) await interaction.followUp(payload).catch(() => {});
+      else await interaction.reply(payload).catch(() => {});
+    } catch (_) {}
   }
 });
+
 
 registerAntiNuke(client);
 registerReactionRoles(client);
